@@ -119,9 +119,8 @@ class OpenIdIdentificationPlugin(object):
         After the challenge has been called we might get here a
         response from an openid provider.
         """
-
         request = Request(environ)
-
+        
         # First test for logout as we then don't need the rest.
         if request.path == self.logout_handler_path:
             identity = self._logout_and_redirect(environ)
