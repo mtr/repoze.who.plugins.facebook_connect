@@ -307,31 +307,34 @@ class OpenIdIdentificationPlugin(object):
             environ['repoze.who.logger'].info('No OpenID services found for: %s ' %openid_url)
             return self._redirect_to_loginform(environ)
        
-        # we have to tell the openid provider where to send the user after login
-        # so we need to compute this from our path and application URL
-        # we simply use the URL we are at right now (which is the form)
-        # this will be captured by the repoze.who identification plugin later on
-        # it will check if some valid openid response is coming back
-        # trust_root is the URL (realm) which will be presented to the user
-        # in the login process and should be your applications url
-        # TODO: make this configurable?
-        # return_to is the actual URL to be used for returning to this app
+        # we have to tell the openid provider where to send the user
+        # after login so we need to compute this from our path and
+        # application URL we simply use the URL we are at right now
+        # (which is the form) this will be captured by the repoze.who
+        # identification plugin later on it will check if some valid
+        # openid response is coming back trust_root is the URL (realm)
+        # which will be presented to the user in the login process and
+        # should be your applications url TODO: make this
+        # configurable?  return_to is the actual URL to be used for
+        # returning to this app
         return_to = request.path_url # we return to this URL here
         trust_root = request.application_url
         environ['repoze.who.logger'].debug('setting return_to URL to : %s ' %return_to)
         
-        # TODO: usually you should check openid_request.shouldSendRedirect()
-        # but this might say you have to use a form redirect and I don't get why
-        # so we do the same as plone.openid and ignore it.
+        # TODO: usually you should check
+        # openid_request.shouldSendRedirect() but this might say you
+        # have to use a form redirect and I don't get why so we do the
+        # same as plone.openid and ignore it.
         
-        # Request additional information (optional here, could require fields as well)...
+        # Request additional information (optional here, could require
+        # fields as well)...
         if self.sreg_optional or self.sreg_required:
             openid_request.addExtension(
                 sreg.SRegRequest(
                     required = self.sreg_required,
                     optional = self.sreg_optional,
+                    )
                 )
-            )
 
         # TODO: we might also want to give the application some way of adding
         # extensions to this message.
