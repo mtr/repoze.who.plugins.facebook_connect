@@ -9,6 +9,7 @@ from repoze.who.interfaces import IIdentifier
 from repoze.who.interfaces import IAuthenticator
 
 from webob import Request, Response
+from pylons.controllers.util import Response as UtilResponse
 
 import openid
 from openid.store import memstore, filestore, sqlstore
@@ -32,25 +33,28 @@ class OpenIdIdentificationPlugin(object):
 
     implements(IChallenger, IIdentifier, IAuthenticator)
 
-    def __init__(self, store, 
-                    openid_field, 
-                    error_field = '',
-                    store_file_path='',
-                    session_name = '',
-                    login_handler_path = '',
-                    logout_handler_path = '',
-                    login_form_url = '',
-                    logged_in_url = '',
-                    logged_out_url = '',
-                    came_from_field = '',
-                    rememberer_name = '',
-                    sql_associations_table = '',
-                    sql_nonces_table = '',
-                    sql_connstring = '',
-                    md_provider_name = 'openidmd',
-                    sreg_required = None,
-                    sreg_optional = None,
-                    ):
+    def __init__(self,
+                 store, 
+                 openid_field, 
+                 error_field='',
+                 store_file_path='',
+                 session_name='',
+                 login_handler_path='',
+                 logout_handler_path='',
+                 login_form_url='',
+                 logged_in_url='',
+                 logged_out_url='',
+                 came_from_field='',
+                 rememberer_name='',
+                 sql_associations_table='',
+                 sql_nonces_table='',
+                 sql_connstring='',
+                 md_provider_name='openidmd',
+                 sreg_required=None,
+                 sreg_optional=None,
+                 cookie_identifier=None,
+                 cookie_secret='My Secret',
+                 ):
 
         self.rememberer_name = rememberer_name
         self.login_handler_path = login_handler_path
@@ -70,7 +74,10 @@ class OpenIdIdentificationPlugin(object):
         self.md_provider_name = md_provider_name
         self.sreg_required = sreg_required or []
         self.sreg_optional = sreg_optional or ['email','fullname', 'nickname']
-        
+
+        self.cookie_identifier = cookie_identifier
+        self.cookie_secret = cookie_secret
+
         # set up the store
         if store==u"file":
             self.store = filestore.FileOpenIDStore(store_file_path)
@@ -107,107 +114,128 @@ class OpenIdIdentificationPlugin(object):
 
     # IIdentifier
     def identify(self, environ):
-        """this method is called when a request is incoming.
+        """This method is called when a request is incoming.
 
-        After the challenge has been called we might get here a response
-        from an openid provider.
-
+        After the challenge has been called we might get here a
+        response from an openid provider.
         """
 
         request = Request(environ)
-        
-        # first test for logout as we then don't need the rest
+
+        # First test for logout as we then don't need the rest.
         if request.path == self.logout_handler_path:
-            res = Response()
-            # set forget headers
-            for a,v in self.forget(environ,{}):
-                res.headers.add(a,v)
-            res.status = 302
-            res.location = self.logged_out_url
-            environ['repoze.who.application'] = res
-            return {}
-
-        identity = {}
-
-        # first we check we are actually on the URL which is supposed to be the
-        # url to return to (login_handler_path in configuration)
-        # this URL is used for both: the answer for the login form and
-        # when the openid provider redirects the user back.
-        if request.path == self.login_handler_path:
-
-        # in the case we are coming from the login form we should have 
-        # an openid in here the user entered
-            open_id = request.params.get(self.openid_field, None)
-            log = environ['repoze.who.logger']
-            log.debug('checking openid results for : %s ' %open_id)
+            identity = self._logout_and_redirect(environ)
             
-            if open_id is not None:
-                open_id = open_id.strip()
+        # Then we check that we are actually on the URL which is
+        # supposed to be the url to return to (login_handler_path in
+        # configuration) this URL is used for both: the answer for the
+        # login form and when the openid provider redirects the user
+        # back.
+        elif request.path == self.login_handler_path:
+            # In the case we are coming from the login form we should
+            # have an openid in here the user entered.
+            identity = self._handle_login(environ, request)
             
-            # we don't do anything with the openid we found ourselves but we put it in here
-            # to tell the challenge plugin to initiate the challenge
-            identity['repoze.whoplugins.openid.openid'] = environ['repoze.whoplugins.openid.openid'] = open_id
-        
-            # this part now is for the case when the openid provider redirects
-            # the user back. We should find some openid specific fields in the request.
-            mode=request.params.get("openid.mode", None)
-            if mode=="id_res":
-                oidconsumer = self.get_consumer(environ)
-                info = oidconsumer.complete(request.params, request.url)
-
-                if info.status == consumer.SUCCESS:
-                    log.info('openid request successful for : %s ' %open_id)
-                    
-                    display_identifier = info.identity_url
-                    
-                    # remove this so that the challenger is not triggered again
-                    del environ['repoze.whoplugins.openid.openid']
-                    
-                    # store the id for the authenticator
-                    identity['repoze.who.plugins.openid.userid'] = display_identifier
-                    # store the user metadata...
-                    try:
-                        sreg_resp = sreg.SRegResponse.fromSuccessResponse(info)
-                    except AttributeError, err:
-                        log.warn( "Failure during SReg parsing: %s"%( err,) )
-                        sreg_resp = None
-                    if sreg_resp:
-                        environ['repoze.who.logger'].debug("User info received: %s", sreg_resp.data)
-                        user_data = dict()
-                        for field in self.sreg_required + self.sreg_optional:
-                            sreg_val = sreg_resp.get(field)
-                            if sreg_val:
-                                user_data[field] = sreg_val
-                        if user_data:
-                            md = self._get_md_provider( environ )
-                            if md:
-                                if not md.register_user( 
-                                    display_identifier, user_data 
-                                ):
-                                    log.error( "Unable to register user" )
-                                    return None
-                            else:
-                                log.warn( "No metadata provider %s found"%(
-                                    self.md_provider_name,
-                                ))
-                    else:
-                        log.warn(
-                            "No user metadata received!"
-                        )
-
-                    # now redirect to came_from or the success page
-                    self.redirect_to_logged_in(environ)
-                    return identity
-                    
-                # TODO: Do we have to check for more failures and such?
-                # 
-            elif mode=="cancel":
-                # cancel is a negative assertion in the OpenID protocol,
-                # which means the user did not authorize correctly.
-                environ['repoze.whoplugins.openid.error'] = 'OpenID authentication failed.'
-                pass
         return identity
 
+    def _handle_login(self, environ, request):
+        # In the case we are coming from the login form we should have
+        # an openid in here the user entered.
+        open_id = request.params.get(self.openid_field, None)
+
+        log = environ['repoze.who.logger']
+        log.debug('checking openid results for : %s', open_id)
+
+        if open_id is not None:
+            open_id = open_id.strip()
+
+        identity = {}
+        
+        # We don't do anything with the openid we found ourselves but
+        # we put it in here to tell the challenge plugin to initiate
+        # the challenge.
+        environ['repoze.whoplugins.openid.openid'] = open_id
+        identity['repoze.whoplugins.openid.openid'] = open_id
+        
+        # This part now is for the case when the openid provider
+        # redirects the user back.  We should find some openid
+        # specific fields in the request.
+        mode = request.params.get("openid.mode", None)
+        if mode == "id_res":
+            oidconsumer = self.get_consumer(environ)
+            info = oidconsumer.complete(request.params, request.url)
+
+            if info.status == consumer.SUCCESS:
+                identity = self._handle_successful_response(info,
+                                                            open_id,
+                                                            environ,
+                                                            identity)
+                
+            # TODO: Do we have to check for more failures and such?
+            # 
+        elif mode == "cancel":
+            # Cancel is a negative assertion in the OpenID protocol,
+            # which means the user did not authorize correctly.
+            environ['repoze.whoplugins.openid.error'] \
+                = 'OpenID authentication failed.'
+            
+        return identity
+
+    def _handle_successful_response(self, info, open_id, environ, identity):
+        log = environ['repoze.who.logger']        
+        log.info('openid request successful for : %s ', open_id)
+
+        # Remove this so that the challenger is not triggered again.
+        del environ['repoze.whoplugins.openid.openid']
+
+        # Store the id for the authenticator.
+        identity['repoze.who.plugins.openid.userid'] = info.identity_url
+        
+        # Store the user metadata.
+        try:
+            sreg_resp = sreg.SRegResponse.fromSuccessResponse(info)
+        except AttributeError, err:
+            log.warn("Failure during SReg parsing: %s", err)
+            sreg_resp = None
+            
+        if sreg_resp:
+            log.debug("User info received: %s", sreg_resp.data)
+            user_data = dict()
+            for field in self.sreg_required + self.sreg_optional:
+                sreg_val = sreg_resp.get(field)
+                if sreg_val:
+                    user_data[field] = sreg_val
+                    
+            if user_data:
+                md = self._get_md_provider(environ)
+                if md:
+                    if not md.register_user(info.identity_url, user_data):
+                        log.error("Unable to register user")
+                        identity = None
+                else:
+                    log.warn("No metadata provider %s found",
+                             self.md_provider_name)
+        else:
+            log.warn("No user metadata received!")
+
+        if not identity is None:
+            # Redirect to came_from or the success page.
+            self.redirect_to_logged_in(environ)
+            
+        return identity
+
+    def _logout_and_redirect(self, environ):
+        res = Response()
+        # Set forget headers.
+        for a, v in self.forget(environ, {}):
+            res.headers.add(a, v)
+        res.status = 302
+        res.location = self.logged_out_url
+        
+        environ['repoze.who.application'] = res
+        
+        return {}
+    
     # IIdentifier
     def remember(self, environ, identity):
         """remember the openid in the session we have anyway"""
