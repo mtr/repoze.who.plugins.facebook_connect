@@ -99,31 +99,40 @@ class OpenIdIdentificationPlugin(object):
         session = environ.get(self.session_name,{})
         return consumer.Consumer(session,self.store)
         
-    def redirect_to_logged_in(self, environ):
-        """redirect to came_from or standard page if login was successful"""
-        request = Request(environ)
-        came_from = request.params.get(self.came_from_field,'')
-        if came_from!='':
-            url = came_from
-        else:
-            url = self.logged_in_url
-        res = Response()
-        res.status = 302
-        res.location = url
-        environ['repoze.who.application'] = res    
+    def _redirect_to(self, environ, target_url=None):
+        """Redirect to target_url if given, or to came_from if
+        defined.  Otherwise, redirect to standard logged_in_url page.
+        """
+        if target_url is None:
+            target_url = Request(environ).params.get(self.came_from_field, '') \
+                         or self.logged_in_url
+            
+        response = Response()
+        response.status = 302
+        response.location = target_url
+        
+        environ['repoze.who.application'] = response    
 
     # IIdentifier
     def identify(self, environ):
         """This method is called when a request is incoming.
-
+        
+        If credentials are found, the returned identity mapping will
+        contain an arbitrary set of key/value pairs.
+        
+        Return None to indicate that the plugin found no appropriate
+        credentials.
+        
         After the challenge has been called we might get here a
         response from an openid provider.
         """
+        self.log = environ['repoze.who.logger']
+        
         request = Request(environ)
         
         # First test for logout as we then don't need the rest.
         if request.path == self.logout_handler_path:
-            identity = self._logout_and_redirect(environ)
+            identity = self._logout_and_redirect(environ) # Returns {}.
             
         # Then we check that we are actually on the URL which is
         # supposed to be the url to return to (login_handler_path in
@@ -132,18 +141,15 @@ class OpenIdIdentificationPlugin(object):
         # back.
         elif request.path == self.login_handler_path:
             # In the case we are coming from the login form we should
-            # have an openid in here the user entered.
+            # have an openid in the request, entered by the user.
             identity = self._handle_login(environ, request)
             
         return identity
 
     def _handle_login(self, environ, request):
-        # In the case we are coming from the login form we should have
-        # an openid in here the user entered.
         open_id = request.params.get(self.openid_field, None)
-
-        log = environ['repoze.who.logger']
-        log.debug('checking openid results for : %s', open_id)
+        
+        self.log.debug('checking openid results for: "%s".', open_id)
 
         if open_id is not None:
             open_id = open_id.strip()
@@ -161,17 +167,19 @@ class OpenIdIdentificationPlugin(object):
         # specific fields in the request.
         mode = request.params.get("openid.mode", None)
         if mode == "id_res":
-            oidconsumer = self.get_consumer(environ)
-            info = oidconsumer.complete(request.params, request.url)
-
+            info = self.get_consumer(environ).complete(request.params,
+                                                       request.url)
+            
+            # Remove this so that the challenger is not triggered
+            # again.
+            del environ['repoze.whoplugins.openid.openid']
+            
             if info.status == consumer.SUCCESS:
-                identity = self._handle_successful_response(info,
-                                                            open_id,
-                                                            environ,
-                                                            identity)
+                identity = self._handle_successful_response(environ, identity,
+                                                            open_id, info)
                 
             # TODO: Do we have to check for more failures and such?
-            # 
+            
         elif mode == "cancel":
             # Cancel is a negative assertion in the OpenID protocol,
             # which means the user did not authorize correctly.
@@ -180,25 +188,22 @@ class OpenIdIdentificationPlugin(object):
             
         return identity
 
-    def _handle_successful_response(self, info, open_id, environ, identity):
-        log = environ['repoze.who.logger']        
-        log.info('openid request successful for : %s ', open_id)
-
-        # Remove this so that the challenger is not triggered again.
-        del environ['repoze.whoplugins.openid.openid']
-
+    def _handle_successful_response(self, environ, identity, open_id, info):
+        self.log.info('openid request successful for : %s ', open_id)
+        
         # Store the id for the authenticator.
         identity['repoze.who.plugins.openid.userid'] = info.identity_url
-        
-        # Store the user metadata.
+
+        # Parse the SREG information.
         try:
             sreg_resp = sreg.SRegResponse.fromSuccessResponse(info)
         except AttributeError, err:
-            log.warn("Failure during SReg parsing: %s", err)
+            self.log.warn("Failure during SReg parsing: %s", err)
             sreg_resp = None
             
         if sreg_resp:
-            log.debug("User info received: %s", sreg_resp.data)
+            # Store the user metadata.
+            self.log.debug("User info received: %s", sreg_resp.data)
             user_data = dict()
             for field in self.sreg_required + self.sreg_optional:
                 sreg_val = sreg_resp.get(field)
@@ -208,32 +213,48 @@ class OpenIdIdentificationPlugin(object):
             if user_data:
                 md = self._get_md_provider(environ)
                 if md:
-                    if not md.register_user(info.identity_url, user_data):
-                        log.error("Unable to register user")
+                    status = md.register_user(info.identity_url, user_data)
+                    
+                    if status is True:
+                        # User existed and this should be considered a
+                        # successful login.
+                        pass
+                    
+                    elif status is None:
+                        # User did not exist, but a temporary user has
+                        # been created.
                         identity = None
-                else:
-                    log.warn("No metadata provider %s found",
-                             self.md_provider_name)
-        else:
-            log.warn("No user metadata received!")
+                        
+                    elif status is False:
+                        # Error.  Perhaps another user is already
+                        # registered with the same OpenID?
+                        self.log.error("Unable to register user")
+                        identity = None
 
+                else:
+                    self.log.warn("No metadata provider %s found",
+                                  self.md_provider_name)
+        else:
+            self.log.warn("No user metadata received!")
+            
         if not identity is None:
-            # Redirect to came_from or the success page.
-            self.redirect_to_logged_in(environ)
+            # Redirect to came_from or the login success page.
+            self._redirect_to(environ)
             
         return identity
 
     def _logout_and_redirect(self, environ):
-        res = Response()
+        response = Response()
+
         # Set forget headers.
         for a, v in self.forget(environ, {}):
-            res.headers.add(a, v)
-        res.status = 302
-        res.location = self.logged_out_url
+            response.headers.add(a, v)
+            
+        response.status = 302
+        response.location = self.logged_out_url
+        environ['repoze.who.application'] = response
         
-        environ['repoze.who.application'] = res
-        
-        return {}
+        return {}                  # Unset authentication information.
     
     # IIdentifier
     def remember(self, environ, identity):
