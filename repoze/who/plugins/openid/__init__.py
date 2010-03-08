@@ -19,8 +19,8 @@ def make_identification_plugin(
     md_provider_name='openidmd',
     sreg_required='',
     sreg_optional='',
-    cookie_identifier=None,
-    cookie_secret='My Secret',
+#    cookie_identifier=None,
+#    cookie_secret='My Secret',
     ):
     if store not in (u'mem',u'file',u'sql'):
         raise ValueError("store needs to be 'mem', 'sql' or 'file'")
@@ -38,8 +38,8 @@ def make_identification_plugin(
         raise ValueError("logged_in_url needs to be given")
     if logged_out_url is None:
         raise ValueError("logged_out_url needs to be given")
-    if cookie_identifier is None:
-        raise ValueError("cookie_identifier needs to be given")
+#    if cookie_identifier is None:
+#        raise ValueError("cookie_identifier needs to be given")
     
     sreg_required = [attr.strip(',') for attr in sreg_required.split()] or None
     sreg_optional = [attr.strip(',') for attr in sreg_optional.split()] or None
@@ -63,8 +63,8 @@ def make_identification_plugin(
         md_provider_name=md_provider_name,
         sreg_required=sreg_required,
         sreg_optional=sreg_optional,
-        cookie_identifier=cookie_identifier,
-        cookie_secret=cookie_secret,                                
+#        cookie_identifier=cookie_identifier,
+#        cookie_secret=cookie_secret,                                
         )
     return plugin
 

@@ -1,23 +1,39 @@
-import cgi
-import urlparse
-import cgitb
-import sys
+import base64
+import hmac
+
+from openid.consumer import consumer
+from openid.extensions import sreg
+from openid.store import memstore, filestore, sqlstore
+from pylons.controllers.util import Response as PylonsResponse
+from repoze.who.interfaces import IChallenger, IIdentifier, IAuthenticator
+from webob import Request
 from zope.interface import implements
 
-from repoze.who.interfaces import IChallenger
-from repoze.who.interfaces import IIdentifier
-from repoze.who.interfaces import IAuthenticator
+try:
+    import cPickle as pickle
+except ImportError:
+    import pickle
+try:
+    from hashlib import sha1
+except ImportError:
+    import sha as sha1
 
-from webob import Request, Response
-from pylons.controllers.util import Response as UtilResponse
+class Response(PylonsResponse):
+    def signed_cookie(self, name, data, secret=None, **kwargs):
+        """Save a signed cookie with ``secret`` signature
+        
+        Saves a signed cookie of the pickled data. All other keyword
+        arguments that ``WebOb.set_cookie`` accepts are usable and
+        passed to the WebOb set_cookie method after creating the signed
+        cookie value.
 
-import openid
-from openid.store import memstore, filestore, sqlstore
-from openid.consumer import consumer
-from openid.oidutil import appendArgs
-from openid.cryptutil import randomString
-from openid.fetchers import setDefaultFetcher, Urllib2Fetcher
-from openid.extensions import pape, sreg
+        This implementation fixes the problem when
+        base64.encodestring, originally used, returned an
+        endline-partitioned string.
+        """
+        pickled = pickle.dumps(data, pickle.HIGHEST_PROTOCOL)
+        sig = hmac.new(secret, pickled, sha1).hexdigest()
+        self.set_cookie(name, sig + base64.b64encode(pickled), **kwargs)
 
 
 class OpenIdIdentificationPlugin(object):
@@ -52,8 +68,6 @@ class OpenIdIdentificationPlugin(object):
                  md_provider_name='openidmd',
                  sreg_required=None,
                  sreg_optional=None,
-                 cookie_identifier=None,
-                 cookie_secret='My Secret',
                  ):
 
         self.rememberer_name = rememberer_name
@@ -75,9 +89,6 @@ class OpenIdIdentificationPlugin(object):
         self.sreg_required = sreg_required or []
         self.sreg_optional = sreg_optional or ['email','fullname', 'nickname']
 
-        self.cookie_identifier = cookie_identifier
-        self.cookie_secret = cookie_secret
-
         # set up the store
         if store==u"file":
             self.store = filestore.FileOpenIDStore(store_file_path)
@@ -98,8 +109,8 @@ class OpenIdIdentificationPlugin(object):
     def get_consumer(self,environ):
         session = environ.get(self.session_name,{})
         return consumer.Consumer(session,self.store)
-        
-    def _redirect_to(self, environ, target_url=None):
+
+    def _redirect_to(self, environ, target_url=None, cookies=[]):
         """Redirect to target_url if given, or to came_from if
         defined.  Otherwise, redirect to standard logged_in_url page.
         """
@@ -108,9 +119,16 @@ class OpenIdIdentificationPlugin(object):
                          or self.logged_in_url
             
         response = Response()
-        response.status = 302
+        
+        # Redirect.
+        response.status = 302           # HTTP Status: Found.
         response.location = target_url
         
+        # Add cookie headers, if requested.
+        for (cookie_identity, cookie_data, cookie_parameters) in cookies:
+            response.signed_cookie(cookie_identity, cookie_data,
+                                   **cookie_parameters)
+            
         environ['repoze.who.application'] = response    
 
     # IIdentifier
@@ -143,6 +161,8 @@ class OpenIdIdentificationPlugin(object):
             # In the case we are coming from the login form we should
             # have an openid in the request, entered by the user.
             identity = self._handle_login(environ, request)
+        else:
+            identity = {}
             
         return identity
 
@@ -184,16 +204,16 @@ class OpenIdIdentificationPlugin(object):
             # Cancel is a negative assertion in the OpenID protocol,
             # which means the user did not authorize correctly.
             environ['repoze.whoplugins.openid.error'] \
-                = 'OpenID authentication failed.'
+                    = 'OpenID authentication failed.'
             
         return identity
 
     def _handle_successful_response(self, environ, identity, open_id, info):
         self.log.info('openid request successful for : %s ', open_id)
         
-        # Store the id for the authenticator.
-        identity['repoze.who.plugins.openid.userid'] = info.identity_url
-
+        target_url = None
+        extra_cookies = []
+        
         # Parse the SREG information.
         try:
             sreg_resp = sreg.SRegResponse.fromSuccessResponse(info)
@@ -213,13 +233,15 @@ class OpenIdIdentificationPlugin(object):
             if user_data:
                 md = self._get_md_provider(environ)
                 if md:
-                    status = md.register_user(info.identity_url, user_data)
+                    (status, target_url, extra_cookies) \
+                            = md.register_user(info.identity_url, user_data,
+                                               environ, identity)
                     
                     if status is True:
                         # User existed and this should be considered a
                         # successful login.
                         pass
-                    
+                        
                     elif status is None:
                         # User did not exist, but a temporary user has
                         # been created.
@@ -236,11 +258,13 @@ class OpenIdIdentificationPlugin(object):
                                   self.md_provider_name)
         else:
             self.log.warn("No user metadata received!")
+            # Store the id for the authenticator.
+            identity['repoze.who.plugins.openid.userid'] = info.identity_url
             
-        if not identity is None:
-            # Redirect to came_from or the login success page.
-            self._redirect_to(environ)
-            
+        # If target_url is None, then redirect to came_from or the
+        # login success page.
+        self._redirect_to(environ, target_url, extra_cookies)
+        
         return identity
 
     def _logout_and_redirect(self, environ):
