@@ -1,8 +1,11 @@
-from identification import OpenIdIdentificationPlugin
+from identification import FacebookConnectIdentificationPlugin
+from repoze.who.utils import resolveDotted
 
 def make_identification_plugin(
-    store='mem',
-    openid_field="openid",
+    fb_connect_field="fb_connect",
+    db_session=None,
+    user_class=None,
+    fb_user_class=None,
     session_name=None,
     login_handler_path=None,
     logout_handler_path=None,
@@ -11,19 +14,10 @@ def make_identification_plugin(
     logged_in_url=None,
     logged_out_url=None,
     came_from_field='came_from',
-    store_file_path='',
     rememberer_name=None,
-    sql_associations_table='',
-    sql_nonces_table='',
-    sql_connstring='',
-    md_provider_name='openidmd',
-    sreg_required='',
-    sreg_optional='',
-#    cookie_identifier=None,
-#    cookie_secret='My Secret',
+    md_provider_name='facebook_connect_md',
+    fields='',
     ):
-    if store not in (u'mem',u'file',u'sql'):
-        raise ValueError("store needs to be 'mem', 'sql' or 'file'")
     if login_form_url is None:
         raise ValueError("login_form_url needs to be given")
     if rememberer_name is None:
@@ -38,33 +32,25 @@ def make_identification_plugin(
         raise ValueError("logged_in_url needs to be given")
     if logged_out_url is None:
         raise ValueError("logged_out_url needs to be given")
-#    if cookie_identifier is None:
-#        raise ValueError("cookie_identifier needs to be given")
     
-    sreg_required = [attr.strip(',') for attr in sreg_required.split()] or None
-    sreg_optional = [attr.strip(',') for attr in sreg_optional.split()] or None
+    fields = [attr.strip(',') for attr in fields.split()] or None
     
-    plugin = OpenIdIdentificationPlugin(
-        store, 
-        openid_field=openid_field,
+    plugin = FacebookConnectIdentificationPlugin(
+        fb_connect_field=fb_connect_field,
         error_field=error_field,
+        db_session=resolveDotted(db_session),
+        user_class=resolveDotted(user_class),
+        fb_user_class=resolveDotted(fb_user_class),
         session_name=session_name,
         login_form_url=login_form_url,
         login_handler_path=login_handler_path,
         logout_handler_path=logout_handler_path,
-        store_file_path=store_file_path,
         logged_in_url=logged_in_url,
         logged_out_url=logged_out_url,
         came_from_field=came_from_field,
         rememberer_name=rememberer_name,
-        sql_associations_table=sql_associations_table,
-        sql_nonces_table=sql_nonces_table,
-        sql_connstring=sql_connstring,
         md_provider_name=md_provider_name,
-        sreg_required=sreg_required,
-        sreg_optional=sreg_optional,
-#        cookie_identifier=cookie_identifier,
-#        cookie_secret=cookie_secret,                                
+        fields=fields,
         )
     return plugin
 
