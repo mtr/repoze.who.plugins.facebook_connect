@@ -29,7 +29,7 @@ setup(name='repoze.who.plugins.facebook_connect',
       zip_safe=False,
       install_requires=[
           'repoze.who>=1.0.6', 
-	  'pyfacebook>=0',
+	  'facebook-python-sdk>=0.1',
           'setuptools',
           'webob',
           'zope.interface'
