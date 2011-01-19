@@ -177,9 +177,9 @@ class FacebookConnectIdentificationPlugin(object):
             
         environ['repoze.who.application'] = response    
 
-    def _fb_factory(self):
-        return facebook.Facebook(config['pyfacebook.apikey'],
-                                 config['pyfacebook.secret'])
+    # def _fb_factory(self):
+    #     return facebook.Facebook(config['pyfacebook.apikey'],
+    #                              config['pyfacebook.secret'])
 
     # IIdentifier
     def identify(self, environ):
@@ -219,53 +219,68 @@ class FacebookConnectIdentificationPlugin(object):
         
         #self.log.debug('request.environ = %s', pformat(request.environ))
         
-        fb = self._fb_factory()
-        
-        if not fb.check_session(request):
-            response = Response(request=request)
-            # Will also prepare redirection through response's fields.
-            fb.logout(response)
-            environ['repoze.who.application'] = response
-            #clear_cookie_state(fb, response)
+        #fb = self._fb_factory()
+
+        fb_user = facebook.get_user_from_cookie(request.cookies,
+                                                config['pyfacebook.appid'],
+                                                config['pyfacebook.secret'])
+        if not fb_user:
+            self.log.warn('Facebook Python-SDK did not return any user data.')
+            self._logout_and_redirect(environ)
+            # response = Response(request=request)
+            # # Will also prepare redirection through response's fields.
+            # environ['repoze.who.application'] = response
             return None
+
+        self.log.warn('Received (from cookie) fb_user = %s', fb_user)
+        # Store a local instance of the user data so we don't need
+        # a round-trip to Facebook on every request
         
-        self.log.debug(#('\n' * 10) +
-            'fb.getLoggedInUser() ...')
         try:
-            fb_uid = fb.users.getLoggedInUser()
-            fields = fb.users.getInfo([fb_uid], self.fields)[0]
-        except facebook.FacebookError, e:
-            # Error 102: Session key invalid or no longer valid.
-            if e.code == 102:
-                # E.g., delete the cookie and send the user to
-                # Facebook to login.
-                self.log.warn('Facebook Error: ' \
-                              'Session key invalid or no longer valid.')
-                self.log.warn('Logging out from Facebook session.')
-                response = Response(request=request)
-                fb.logout(response)
-                environ['repoze.who.application'] = response
-                return None
+            graph = facebook.GraphAPI(fb_user["access_token"])
+            profile = graph.get_object("me")
             
-            else:
-                raise
-        # If we get this far, we have a valid Facebook user with an
-        # on-going Facebook session.
-        self.log.debug(#('\n' * 10) +
-            'fb.getLoggedInUser() = %s.', fb_uid)
-        self.log.debug('fb.users.getInfo([fb_uid], self.fields)[0] = %s.',
-                       fields)
+            #fb_uid = fb.users.getLoggedInUser()
+            #fields = fb.users.getInfo([fb_uid], self.fields)[0]
+        #except facebook.FacebookError, e:
+        except facebook.GraphAPIError as e:
+            log.warn('Received %s: type=%s, message=%s',
+                     type(e), repr(e.type), repr(e.message))
+            
+            # Error 102: Session key invalid or no longer valid.
+            # if e.code == 102:
+            #     # E.g., delete the cookie and send the user to
+            #     # Facebook to login.
+            #     self.log.warn('Facebook Error: ' \
+            #                   'Session key invalid or no longer valid.')
+            #     self.log.warn('Logging out from Facebook session.')
+            #     response = Response(request=request)
+            #     fb.logout(response)
+            #     environ['repoze.who.application'] = response
+            #     return None
+            raise
         
+        profile['access_token'] = fb_user['access_token']
+        
+        self.log.warn('graph.get_object("me") = %s', repr(profile))
+        
+        # # If we get this far, we have a valid Facebook user with an
+        # # on-going Facebook session.
+        # self.log.debug(#('\n' * 10) +
+        #     'fb.getLoggedInUser() = %s.', fb_uid)
+        # self.log.debug('fb.users.getInfo([fb_uid], self.fields)[0] = %s.',
+        #                fields)
+
         md = self._get_md_provider(environ)
         if md is None: # or (fb_user is None):
             self.log.warn('identify(): No metadata provider was found.')
             self._redirect_to(environ, None)
             return None
-        
+
         identity = dict()
         
         authenticated, redirect_to_url, cookies \
-            = md.authenticate_or_register_user(fb_uid, fields,
+            = md.authenticate_or_register_user(fb_user['uid'], profile,
                                                environ, identity)
         
         self._redirect_to(environ, redirect_to_url, cookies)
