@@ -7,8 +7,7 @@ from pylons.controllers.util import Response as PylonsResponse
 from repoze.who.interfaces import IChallenger, IIdentifier, IAuthenticator
 from webob import Request
 from zope.interface import implements
-from pprint import pformat
-from onlive.lib.util import space_start, space_end, spacelog
+from onlive.lib.util import spacelog
 import repoze.tm
 
 from tg import config
@@ -24,14 +23,9 @@ try:
 except ImportError:
     import sha as sha1
 
-#from facebook.wsgi import facebook
 import facebook
 
 #_log = logging.getLogger('auth')
-
-
-
-#log.debug('pyfacebook.secret = %s', )
 
 class Response(PylonsResponse):
     def signed_cookie(self, name, data, secret=None, **kwargs):
@@ -203,7 +197,7 @@ class FacebookConnectIdentificationPlugin(object):
                  repoze.tm.isActive(environ))
 
         request = Request(environ)
-        
+
         # First test for logout as we then don't need the rest.
         if request.path == self.logout_handler_path:
             self._logout_and_redirect(environ)
@@ -221,9 +215,16 @@ class FacebookConnectIdentificationPlugin(object):
         
         #fb = self._fb_factory()
 
-        fb_user = facebook.get_user_from_cookie(request.cookies,
-                                                config['pyfacebook.appid'],
-                                                config['pyfacebook.secret'])
+        if 'access_token' in request.params and 'uid' in request.params:
+            fb_user = {
+                'access_token': request.params['access_token'],
+                'uid': request.params['uid'],
+                }
+        else:
+            fb_user = facebook.get_user_from_cookie(request.cookies,
+                                                    config['pyfacebook.appid'],
+                                                    config['pyfacebook.secret'])
+            
         if not fb_user:
             self.log.warn('Facebook Python-SDK did not return any user data.')
             self._logout_and_redirect(environ)
@@ -239,13 +240,15 @@ class FacebookConnectIdentificationPlugin(object):
         try:
             graph = facebook.GraphAPI(fb_user["access_token"])
             profile = graph.get_object("me")
+
+            if not 'id' in profile and profile['id'] == fb_user['uid']:
+                self.log.warn('Facebook Python-SDK received invalid uid.')
+                self._logout_and_redirect(environ)
+                return None
             
-            #fb_uid = fb.users.getLoggedInUser()
-            #fields = fb.users.getInfo([fb_uid], self.fields)[0]
-        #except facebook.FacebookError, e:
         except facebook.GraphAPIError as e:
-            log.warn('Received %s: type=%s, message=%s',
-                     type(e), repr(e.type), repr(e.message))
+            self.log.warn('Received %s: type=%s, message=%s',
+                          type(e), repr(e.type), repr(e.message))
             
             # Error 102: Session key invalid or no longer valid.
             # if e.code == 102:
@@ -264,13 +267,6 @@ class FacebookConnectIdentificationPlugin(object):
         
         self.log.warn('graph.get_object("me") = %s', repr(profile))
         
-        # # If we get this far, we have a valid Facebook user with an
-        # # on-going Facebook session.
-        # self.log.debug(#('\n' * 10) +
-        #     'fb.getLoggedInUser() = %s.', fb_uid)
-        # self.log.debug('fb.users.getInfo([fb_uid], self.fields)[0] = %s.',
-        #                fields)
-
         md = self._get_md_provider(environ)
         if md is None: # or (fb_user is None):
             self.log.warn('identify(): No metadata provider was found.')
@@ -287,66 +283,6 @@ class FacebookConnectIdentificationPlugin(object):
         
         return identity
     
-    
-    def _handle_successful_response(self, environ, identity, open_id, info):
-        self.log.info('Facebook Connect request successful for : %s ', open_id)
-        
-        # Store the id for the authenticator.
-        identity['repoze.who.plugins.fb_connect.userid'] = info.identity_url
-
-        # Parse the SREG information.
-        try:
-            sreg_resp = sreg.SRegResponse.fromSuccessResponse(info)
-        except AttributeError, err:
-            self.log.warn("Failure during SReg parsing: %s", err)
-            sreg_resp = None
-            
-        if sreg_resp:
-            # Store the user metadata.
-            self.log.debug("User info received: %s", sreg_resp.data)
-            user_data = dict()
-            for field in self.sreg_required + self.sreg_optional:
-                sreg_val = sreg_resp.get(field)
-                if sreg_val:
-                    user_data[field] = sreg_val
-                    
-            if user_data:
-                md = self._get_md_provider(environ)
-                if md:
-                    (status, target_url, extra_cookies) \
-                            = md.register_user(info.identity_url, user_data,
-                                               environ, identity)
-                    
-                    if status is True:
-                        # User existed and this should be considered a
-                        # successful login.
-                        pass
-                    
-                    elif status is None:
-                        # User did not exist, but a temporary user has
-                        # been created.
-                        identity = None
-                        
-                    elif status is False:
-                        # Error.  Perhaps another user is already
-                        # registered with the same Facebook Connect?
-                        self.log.error("Unable to register user")
-                        identity = None
-
-                else:
-                    self.log.warn("No metadata provider %s found",
-                                  self.md_provider_name)
-        else:
-            self.self.log.warn("No user metadata received!")
-            # Store the id for the authenticator.
-            identity['repoze.who.plugins.openid.userid'] = info.identity_url
-            
-        # If target_url is None, then redirect to came_from or the
-        # login success page.
-        self._redirect_to(environ, target_url, extra_cookies)
-        
-        return identity
-
     def _logout_and_redirect(self, environ):
         response = Response()
 
@@ -399,7 +335,6 @@ class FacebookConnectIdentificationPlugin(object):
         documentation
         http://wiki.developers.facebook.com/index.php/Facebook_Connect`.
         """
-
         request = Request(environ)
         
         # Check for the field present, if not redirect to login_form
@@ -503,52 +438,12 @@ class FacebookConnectIdentificationPlugin(object):
         """
         self.log.debug('authenticate: identity = %s', identity)
 
-        'repoze.who.plugins.facebook_connect.userid'
         if identity.has_key("repoze.who.plugins.facebook_connect.userid"):
             self.log.info('authenticated : %s ',
                           identity['repoze.who.plugins.facebook_connect.userid'])
             return identity.get('repoze.who.plugins.facebook_connect.userid')
 
         return None
-    
-        # if not (identity.has_key('fb_uid') \
-        #         and identity.has_key('fb_auth_token')):
-        #     return None
-        
-        # #self.log.debug('request.environ = %s', request.environ)
-        # #fb = request.environ['pyfacebook.facebook']
-
-        # del identity['fb_uid']
-        # del identity['fb_auth_token']
-        
-        # self.log.debug('fb.getLoggedInUser() ...')
-        # try:
-        #     fb_uid = fb.users.getLoggedInUser()
-        # except facebook.FacebookError, e:
-        #     # Error 102: Session key invalid or no longer valid.
-        #     if e.code == 102:
-        #         # E.g., delete the cookie and send the user to
-        #         # Facebook to login.
-        #         self.log.info('Facebook Error: ' \
-        #                       'Session key invalid or no longer valid.')
-        #         return None
-        #     else:
-        #         raise
-            
-        # self.log.debug('... fb_uid = %s', fb_uid)
-        
-        # fb_user = self.db_session.query(self.fb_user_class)\
-        #               .filter_by(facebook_user_id=fb_uid).first()
-
-        # if fb_user is not None:
-        #     return fb_user.user
-        
-        # return fb_uid
-        # # if identity.has_key("repoze.who.plugins.fb_connect.userid"):
-        # #     self.log.info('authenticated : "%s"',
-        # #                   identity['repoze.who.plugins.fb_connect.userid'])
-        # #     return identity.get('repoze.who.plugins.fb_connect.userid')
-        
 
     def __repr__(self):
         return '<%s %s>' % (self.__class__.__name__, id(self))
