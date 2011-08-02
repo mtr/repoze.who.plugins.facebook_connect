@@ -241,7 +241,7 @@ class FacebookConnectIdentificationPlugin(object):
             graph = facebook.GraphAPI(fb_user["access_token"])
             profile = graph.get_object("me")
 
-            if not 'id' in profile and profile['id'] == fb_user['uid']:
+            if not ('id' in profile and profile['id'] == fb_user['uid']):
                 self.log.warn('Facebook Python-SDK received invalid uid.')
                 self._logout_and_redirect(environ)
                 return None
