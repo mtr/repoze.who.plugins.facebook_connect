@@ -311,7 +311,6 @@ class FacebookConnectIdentificationPlugin(object):
         environ[REPOZE_WHO_LOGGER].debug('authenticate: identity = %s', identity)
 
         if FACEBOOK_CONNECT_REPOZE_WHO_ID_KEY in identity:
-            print 'authenticated', identity
             environ[REPOZE_WHO_LOGGER].info('authenticated : %s ',
                           identity[FACEBOOK_CONNECT_REPOZE_WHO_ID_KEY])
 
