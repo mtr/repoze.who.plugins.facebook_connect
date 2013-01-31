@@ -1,6 +1,7 @@
 from identification import FacebookConnectIdentificationPlugin
 from repoze.who.utils import resolveDotted
 
+
 def make_identification_plugin(
     fb_connect_field="fb_connect",
     db_session=None,
@@ -17,7 +18,7 @@ def make_identification_plugin(
     rememberer_name=None,
     md_provider_name='facebook_connect_md',
     fields='',
-    ):
+):
     if login_form_url is None:
         raise ValueError("login_form_url needs to be given")
     if rememberer_name is None:
@@ -32,9 +33,9 @@ def make_identification_plugin(
         raise ValueError("logged_in_url needs to be given")
     if logged_out_url is None:
         raise ValueError("logged_out_url needs to be given")
-    
+
     fields = [attr.strip(',') for attr in fields.split()] or None
-    
+
     plugin = FacebookConnectIdentificationPlugin(
         fb_connect_field=fb_connect_field,
         error_field=error_field,
@@ -51,6 +52,5 @@ def make_identification_plugin(
         rememberer_name=rememberer_name,
         md_provider_name=md_provider_name,
         fields=fields,
-        )
+    )
     return plugin
-
