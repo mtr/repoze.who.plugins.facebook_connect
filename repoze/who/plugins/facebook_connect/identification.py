@@ -193,16 +193,16 @@ class FacebookConnectIdentificationPlugin(object):
         elif request.path != self.login_handler_path:
             return None
 
-        # environ[REPOZE_WHO_LOGGER].debug('request.environ = %s',
-        # pformat(request.environ))
-
-        # fb = self._fb_factory()
         redirect_to_self_url = request.application_url + \
             self.login_handler_path
-        if 'access_token' in request.params and 'uid' in request.params:
+
+        if 'access_token' in request.params:
             fb_user = {
                 'access_token': request.params['access_token'],
             }
+
+            data_source = 'from params'
+
         elif 'code' in request.params:
             try:
                 fb_user = facebook.get_access_token_from_code(
@@ -212,23 +212,22 @@ class FacebookConnectIdentificationPlugin(object):
                     config['pyfacebook.secret'])
             except facebook.GraphAPIError as e:
                 environ[REPOZE_WHO_LOGGER] \
-                    .warn(
-                        'Exception in get_access_token_from_code() %s: '
-                        'type=%s, '
-                        'message=%s',
-                        type(e), repr(e.type), repr(e.message))
+                    .warn('Exception in get_access_token_from_code() %s: '
+                          'type=%r, message=%r', type(e), e.type, e.message)
                 self._logout_and_redirect(environ)
                 return None
+
+            data_source = 'via Facebook "code"'
+
         else:
             try:
-                fb_user = facebook.get_user_from_cookie(request.cookies,
-                                                        config['pyfacebook.appid'],
-                                                        config['pyfacebook.secret'])
+                fb_user = facebook.get_user_from_cookie(
+                    request.cookies, config['pyfacebook.appid'],
+                    config['pyfacebook.secret'])
             except facebook.GraphAPIError as e:
                 environ[REPOZE_WHO_LOGGER] \
-                    .warn(
-                        'Exception in get_user_from_cookie() %s: type=%s, message=%s',
-                        type(e), repr(e.type), repr(e.message))
+                    .warn('Exception in get_user_from_cookie() %s: '
+                          'type=%r, message=%r', type(e), e.type, e.message)
                 # Redirect to Facebook to get a code for a new access token.
                 self._redirect_to(
                     environ,
@@ -239,8 +238,11 @@ class FacebookConnectIdentificationPlugin(object):
                             uri=redirect_to_self_url))
                 return None
 
+            data_source = 'from cookie'
+
         environ[REPOZE_WHO_LOGGER] \
-            .info('Received (from cookie) fb_user = %s', fb_user)
+            .info('Received fb_user = %r (%s)', fb_user, data_source)
+
         # Store a local instance of the user data so we don't need
         # a round-trip to Facebook on every request
 
@@ -260,26 +262,14 @@ class FacebookConnectIdentificationPlugin(object):
 
         except facebook.GraphAPIError as e:
             environ[REPOZE_WHO_LOGGER] \
-                .warn('Received %s: type=%s, message=%s',
-                      type(e), repr(e.type), repr(e.message))
-
-            # Error 102: Session key invalid or no longer valid.
-            # if e.code == 102:
-            #     # E.g., delete the cookie and send the user to
-            #     # Facebook to login.
-            #     environ[REPOZE_WHO_LOGGER].warn('Facebook Error: ' \
-            #                   'Session key invalid or no longer valid.')
-            #     environ[REPOZE_WHO_LOGGER].warn('Logging out from Facebook session.')
-            #     response = Response(request=request)
-            #     fb.logout(response)
-            #     environ['repoze.who.application'] = response
-            #     return None
+                .warn('Received %s: type=%r, message=%r',
+                      type(e), e.type, e.message)
             raise
 
         profile['access_token'] = fb_user['access_token']
 
         environ[REPOZE_WHO_LOGGER] \
-            .warn('graph.get_object("me") = %s', repr(profile))
+            .warn('graph.get_object("me") = %r', profile)
 
         if self.identified_hook is None:  # or (fb_user is None):
             environ[REPOZE_WHO_LOGGER] \
