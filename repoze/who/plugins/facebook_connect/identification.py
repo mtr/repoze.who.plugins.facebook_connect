@@ -246,7 +246,7 @@ class FacebookConnectIdentificationPlugin(object):
 
             if not 'id' in profile:
                 environ[REPOZE_WHO_LOGGER] \
-                    warn('Facebook Python-SDK received no uid.')
+                    .warn('Facebook Python-SDK received no uid.')
                 self._logout_and_redirect(environ)
                 return None
             if 'uid' in fb_user:
