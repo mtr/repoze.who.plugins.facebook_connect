@@ -24,10 +24,11 @@ import facebook
 FACEBOOK_CONNECT_REPOZE_WHO_ID_KEY = 'repoze.who.facebook_connect.userid'
 REPOZE_WHO_LOGGER = 'repoze.who.logger'
 
+
 class Response(PylonsResponse):
     def signed_cookie(self, name, data, secret=None, **kwargs):
         """Save a signed cookie with ``secret`` signature
-        
+
         Saves a signed cookie of the pickled data. All other keyword
         arguments that ``WebOb.set_cookie`` accepts are usable and
         passed to the WebOb set_cookie method after creating the signed
@@ -44,7 +45,7 @@ class Response(PylonsResponse):
 
 class FacebookConnectIdentificationPlugin(object):
     """The repoze.who FacebookConnect plugin
-    
+
     This class contains 2 plugin types and is thus implementing
     IIdentifier and IAuthenticator.
     (check the `repoze.who documentation <http://static.repoze.org/bfgdocs/>`_
@@ -68,19 +69,19 @@ class FacebookConnectIdentificationPlugin(object):
            potentially connect) with your site. This state is returned
            as ConnectState.userNotLoggedIn if you call
            FB.Connect.get_status.
-   
+
        3.  Not authorized - this state means that the user is logged
            in to Facebook but has not yet connected with your
            website. In order to make API calls on the user's behalf,
            you must first have the user connect with your site. This
            state is returned as ConnectState.appNotAuthorized if you
            call FB.Connect.get_status.
-    
+
     """
     implements(IIdentifier, IAuthenticator)
 
     def __init__(self,
-                 fb_connect_field='fb_connect', 
+                 fb_connect_field='fb_connect',
                  error_field='',
                  db_session=None,
                  user_class=None,
@@ -97,7 +98,7 @@ class FacebookConnectIdentificationPlugin(object):
                  fields=None,
                  scope=None,
                  ):
-        
+
         self.rememberer_name = rememberer_name
         self.login_handler_path = login_handler_path
         self.logout_handler_path = logout_handler_path
@@ -107,45 +108,45 @@ class FacebookConnectIdentificationPlugin(object):
         self.user_class = user_class
         self.fb_user_class = fb_user_class
         self.db_session = db_session
-        
+
         self.session_name = session_name
         self.error_field = error_field
         self.came_from_field = came_from_field
         self.logged_out_url = logged_out_url
         self.logged_in_url = logged_in_url
-        
+
         self.identified_hook = identified_hook
 
         self.fields = fields or [
-            #u'affiliations',
-            #u'birthday',
+            # u'affiliations',
+            # u'birthday',
             u'birthday_date',
-            #u'current_location',
+            # u'current_location',
             u'first_name',
             u'last_name',
             u'locale',
             u'name',
             u'sex',
-            #u'status',
-            ]
+            # u'status',
+        ]
 
         self.fb_connect_field = fb_connect_field
-            
+
     def _get_rememberer(self, environ):
         rememberer = environ['repoze.who.plugins'][self.rememberer_name]
         return rememberer
-    
+
     def _redirect_to(self, environ, target_url=None, cookies=[], response=None):
         """Redirect to target_url if given, or to came_from if
         defined.  Otherwise, redirect to standard logged_in_url page.
         """
         if target_url is None:
             target_url = Request(environ).params.get(self.came_from_field, '') \
-                         or self.logged_in_url
+                or self.logged_in_url
 
         if response is None:
             response = Response()
-        
+
         # Redirect.
         response.status = 302           # HTTP Status: Found.
         response.location = target_url
@@ -154,8 +155,8 @@ class FacebookConnectIdentificationPlugin(object):
         for (cookie_identity, cookie_data, cookie_parameters) in cookies:
             response.signed_cookie(cookie_identity, cookie_data,
                                    **cookie_parameters)
-            
-        environ['repoze.who.application'] = response    
+
+        environ['repoze.who.application'] = response
 
     # def _fb_factory(self):
     #     return facebook.Facebook(config['pyfacebook.apikey'],
@@ -164,10 +165,10 @@ class FacebookConnectIdentificationPlugin(object):
     # IIdentifier
     def identify(self, environ):
         """This method is called when a request is incoming.
-        
+
         If credentials are found, the returned identity mapping will
         contain an arbitrary set of key/value pairs.
-        
+
         Return None to indicate that the plugin found no appropriate
         credentials.
 
@@ -185,7 +186,7 @@ class FacebookConnectIdentificationPlugin(object):
         if request.path == self.logout_handler_path:
             self._logout_and_redirect(environ)
             return None                 # No identity was found.
-        
+
         # Then we check that we are actually on the URL which is
         # supposed to be the url to return to (login_handler_path in
         # configuration) this URL is used for both: the answer for the
@@ -193,15 +194,17 @@ class FacebookConnectIdentificationPlugin(object):
         # back.
         elif request.path != self.login_handler_path:
             return None
-        
-        # environ[REPOZE_WHO_LOGGER].debug('request.environ = %s', pformat(request.environ))
-        
-        #fb = self._fb_factory()
-        redirect_to_self_url = request.application_url + self.login_handler_path
+
+        # environ[REPOZE_WHO_LOGGER].debug('request.environ = %s',
+        # pformat(request.environ))
+
+        # fb = self._fb_factory()
+        redirect_to_self_url = request.application_url + \
+            self.login_handler_path
         if 'access_token' in request.params and 'uid' in request.params:
             fb_user = {
                 'access_token': request.params['access_token'],
-                }
+            }
         elif 'code' in request.params:
             try:
                 fb_user = facebook.get_access_token_from_code(
@@ -211,22 +214,24 @@ class FacebookConnectIdentificationPlugin(object):
                     config['pyfacebook.secret'])
             except facebook.GraphAPIError as e:
                 environ[REPOZE_WHO_LOGGER] \
-                   .warn(
+                    .warn(
                         'Exception in get_access_token_from_code() %s: '
                         'type=%s, '
                         'message=%s',
-                    type(e), repr(e.type), repr(e.message))
+                        type(e), repr(e.type), repr(e.message))
                 self._logout_and_redirect(environ)
                 return None
         else:
             try:
-                fb_user = facebook.get_user_from_cookie(request.cookies,
-                                                        config['pyfacebook.appid'],
-                                                        config['pyfacebook.secret'])
+                fb_user = facebook.get_user_from_cookie(
+                    request.cookies,
+                    config['pyfacebook.appid'],
+                    config['pyfacebook.secret'])
             except facebook.GraphAPIError as e:
                 environ[REPOZE_WHO_LOGGER] \
-                    .warn('Exception in get_user_from_cookie() %s: type=%s, message=%s',
-                          type(e), repr(e.type), repr(e.message))
+                    .warn('Exception in get_user_from_cookie() %s:'
+                          ' type=%s, message=%s', type(e), repr(e.type),
+                          repr(e.message))
                 # Redirect to Facebook to get a code for a new access token.
                 target_url = "https://www.facebook.com/dialog/oauth?"\
                              "client_id={client_id}" \
@@ -242,7 +247,7 @@ class FacebookConnectIdentificationPlugin(object):
             .info('Received (from cookie) fb_user = %s', fb_user)
         # Store a local instance of the user data so we don't need
         # a round-trip to Facebook on every request
-        
+
         try:
             graph = facebook.GraphAPI(fb_user["access_token"])
             profile = graph.get_object("me")
@@ -256,12 +261,12 @@ class FacebookConnectIdentificationPlugin(object):
                 assert profile['id'] == fb_user['uid']
             else:
                 fb_user['uid'] = profile['id']
-            
+
         except facebook.GraphAPIError as e:
             environ[REPOZE_WHO_LOGGER] \
                 .warn('Received %s: type=%s, message=%s',
-                          type(e), repr(e.type), repr(e.message))
-            
+                      type(e), repr(e.type), repr(e.message))
+
             # Error 102: Session key invalid or no longer valid.
             # if e.code == 102:
             #     # E.g., delete the cookie and send the user to
@@ -274,12 +279,12 @@ class FacebookConnectIdentificationPlugin(object):
             #     environ['repoze.who.application'] = response
             #     return None
             raise
-        
+
         profile['access_token'] = fb_user['access_token']
-        
+
         environ[REPOZE_WHO_LOGGER] \
             .warn('graph.get_object("me") = %s', repr(profile))
-        
+
         if self.identified_hook is None:  # or (fb_user is None):
             environ[REPOZE_WHO_LOGGER] \
                 .warn('identify(): No identified_hook was provided.')
@@ -287,27 +292,27 @@ class FacebookConnectIdentificationPlugin(object):
             return None
 
         identity = dict()
-        
+
         authenticated, redirect_to_url, cookies \
             = self.identified_hook(profile['id'], profile, environ, identity)
-        
+
         self._redirect_to(environ, redirect_to_url, cookies)
-        
+
         return identity
-    
+
     def _logout_and_redirect(self, environ):
         response = Response()
 
         # Set forget headers.
         for a, v in self.forget(environ, {}):
             response.headers.add(a, v)
-            
+
         response.status = 302
         response.location = self.logged_out_url
         environ['repoze.who.application'] = response
-        
+
         return {}                  # Unset authentication information.
-    
+
     # IIdentifier
     def remember(self, environ, identity):
         """Remember the Facebook Connect in the session we have
@@ -327,19 +332,21 @@ class FacebookConnectIdentificationPlugin(object):
     # IAuthenticator
     def authenticate(self, environ, identity):
         """Dummy authenticator
-        
+
         This takes the Facebook Connect identity found and uses it as
         the userid. Normally you would want to take the
         fb_connect and search a user for it to map maybe
         multiple fb_connects to a user.  This means for you to
         simply implement something similar to this.
-        
+
         """
-        environ[REPOZE_WHO_LOGGER].debug('authenticate: identity = %s', identity)
+        environ[REPOZE_WHO_LOGGER].debug(
+            'authenticate: identity = %s', identity)
 
         if FACEBOOK_CONNECT_REPOZE_WHO_ID_KEY in identity:
-            environ[REPOZE_WHO_LOGGER].info('authenticated : %s ',
-                          identity[FACEBOOK_CONNECT_REPOZE_WHO_ID_KEY])
+            environ[REPOZE_WHO_LOGGER].info(
+                'authenticated : %s ',
+                identity[FACEBOOK_CONNECT_REPOZE_WHO_ID_KEY])
 
             return identity.get(FACEBOOK_CONNECT_REPOZE_WHO_ID_KEY)
 
