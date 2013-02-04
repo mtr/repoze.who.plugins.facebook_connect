@@ -214,26 +214,44 @@ class FacebookConnectIdentificationPlugin(object):
         #self.log.debug('request.environ = %s', pformat(request.environ))
         
         #fb = self._fb_factory()
-
+        redirect_to_self_url = request.application_url + self.login_handler_path
         if 'access_token' in request.params and 'uid' in request.params:
             fb_user = {
                 'access_token': request.params['access_token'],
-                'uid': request.params['uid'],
                 }
+        elif 'code' in request.params:
+            try:
+                fb_user = facebook.get_access_token_from_code(
+                    request.params['code'],
+                    redirect_to_self_url,
+                    config['pyfacebook.appid'],
+                    config['pyfacebook.secret'])
+            except facebook.GraphAPIError as e:
+                self.log.warn(
+                    'Exception in get_access_token_from_code() %s: type=%s, '
+                    'message=%s',
+                    type(e), repr(e.type), repr(e.message))
+                self._logout_and_redirect(environ)
+                return None
         else:
-            fb_user = facebook.get_user_from_cookie(request.cookies,
-                                                    config['pyfacebook.appid'],
-                                                    config['pyfacebook.secret'])
-            
-        if not fb_user:
-            self.log.warn('Facebook Python-SDK did not return any user data.')
-            self._logout_and_redirect(environ)
-            # response = Response(request=request)
-            # # Will also prepare redirection through response's fields.
-            # environ['repoze.who.application'] = response
-            return None
+            try:
+                fb_user = facebook.get_user_from_cookie(request.cookies,
+                                                        config['pyfacebook.appid'],
+                                                        config['pyfacebook.secret'])
+            except facebook.GraphAPIError as e:
+                self.log.warn('Exception in get_user_from_cookie() %s: type=%s, message=%s',
+                              type(e), repr(e.type), repr(e.message))
+                # Redirect to Facebook to get a code for a new access token.
+                self._redirect_to(
+                    environ,
+                    target_url="https://www.facebook.com/dialog/oauth?"
+                               "client_id={client_id}"
+                               "&redirect_uri={uri}"
+                    .format(client_id=config['pyfacebook.appid'],
+                            uri=redirect_to_self_url))
+                return None
 
-        self.log.warn('Received (from cookie) fb_user = %s', fb_user)
+        self.log.info('Received (from cookie) fb_user = %s', fb_user)
         # Store a local instance of the user data so we don't need
         # a round-trip to Facebook on every request
         
@@ -241,10 +259,14 @@ class FacebookConnectIdentificationPlugin(object):
             graph = facebook.GraphAPI(fb_user["access_token"])
             profile = graph.get_object("me")
 
-            if not ('id' in profile and profile['id'] == fb_user['uid']):
-                self.log.warn('Facebook Python-SDK received invalid uid.')
+            if not 'id' in profile:
+                self.log.warn('Facebook Python-SDK received no uid.')
                 self._logout_and_redirect(environ)
                 return None
+            if 'uid' in fb_user:
+                assert profile['id'] == fb_user['uid']
+            else:
+                fb_user['uid'] = profile['id']
             
         except facebook.GraphAPIError as e:
             self.log.warn('Received %s: type=%s, message=%s',
@@ -276,7 +298,7 @@ class FacebookConnectIdentificationPlugin(object):
         identity = dict()
         
         authenticated, redirect_to_url, cookies \
-            = md.authenticate_or_register_user(fb_user['uid'], profile,
+            = md.authenticate_or_register_user(profile['id'], profile,
                                                environ, identity)
         
         self._redirect_to(environ, redirect_to_url, cookies)
