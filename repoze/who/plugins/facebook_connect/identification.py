@@ -163,6 +163,11 @@ class FacebookConnectIdentificationPlugin(object):
     #                              config['pyfacebook.secret'])
 
     # IIdentifier
+    def _log_graph_api_exception(self, message, exception, environ):
+        environ[REPOZE_WHO_LOGGER] \
+            .warn('%s %s: type=%s, message=%s', message, type(exception),
+                  repr(exception.type), repr(exception.message))
+
     def identify(self, environ):
         """This method is called when a request is incoming.
 
@@ -213,13 +218,8 @@ class FacebookConnectIdentificationPlugin(object):
                     config['pyfacebook.appid'],
                     config['pyfacebook.secret'])
             except facebook.GraphAPIError as e:
-                environ[REPOZE_WHO_LOGGER] \
-                    .warn(
-                        'Exception in get_access_token_from_code() %s: '
-                        'type=%s, '
-                        'message=%s',
-                        type(e), repr(e.type), repr(e.message))
-                self._logout_and_redirect(environ)
+                self._log_graph_api_exception(
+                    'Exception in get_access_token_from_code()', e, environ)
                 return None
         else:
             try:
@@ -228,10 +228,8 @@ class FacebookConnectIdentificationPlugin(object):
                     config['pyfacebook.appid'],
                     config['pyfacebook.secret'])
             except facebook.GraphAPIError as e:
-                environ[REPOZE_WHO_LOGGER] \
-                    .warn('Exception in get_user_from_cookie() %s:'
-                          ' type=%s, message=%s', type(e), repr(e.type),
-                          repr(e.message))
+                self._log_graph_api_exception(
+                    'Exception in get_user_from_cookie()', e, environ)
                 # Redirect to Facebook to get a code for a new access token.
                 target_url = "https://www.facebook.com/dialog/oauth?"\
                              "client_id={client_id}" \
@@ -263,9 +261,8 @@ class FacebookConnectIdentificationPlugin(object):
                 fb_user['uid'] = profile['id']
 
         except facebook.GraphAPIError as e:
-            environ[REPOZE_WHO_LOGGER] \
-                .warn('Received %s: type=%s, message=%s',
-                      type(e), repr(e.type), repr(e.message))
+            self._log_graph_api_exception(
+                'Exception in get_object()', e, environ)
 
             # Error 102: Session key invalid or no longer valid.
             # if e.code == 102:
