@@ -165,8 +165,8 @@ class FacebookConnectIdentificationPlugin(object):
     # IIdentifier
     def _log_graph_api_exception(self, message, exception, environ):
         environ[REPOZE_WHO_LOGGER] \
-            .warn('%s %s: type=%s, message=%s', message, type(exception),
-                  repr(exception.type), repr(exception.message))
+            .warn('%s %s: type=%r, message=%r', message, type(exception),
+                  exception.type, exception.message)
 
     def identify(self, environ):
         """This method is called when a request is incoming.
@@ -200,16 +200,16 @@ class FacebookConnectIdentificationPlugin(object):
         elif request.path != self.login_handler_path:
             return None
 
-        # environ[REPOZE_WHO_LOGGER].debug('request.environ = %s',
-        # pformat(request.environ))
-
-        # fb = self._fb_factory()
         redirect_to_self_url = request.application_url + \
             self.login_handler_path
-        if 'access_token' in request.params and 'uid' in request.params:
+
+        if 'access_token' in request.params:
             fb_user = {
                 'access_token': request.params['access_token'],
             }
+
+            data_source = 'from params'
+
         elif 'code' in request.params:
             try:
                 fb_user = facebook.get_access_token_from_code(
@@ -222,6 +222,9 @@ class FacebookConnectIdentificationPlugin(object):
                     'Exception in get_access_token_from_code()', e, environ)
                 self._redirect_to(environ)
                 return None
+
+            data_source = 'via Facebook "code"'
+
         else:
             try:
                 fb_user = facebook.get_user_from_cookie(
@@ -235,15 +238,18 @@ class FacebookConnectIdentificationPlugin(object):
                 target_url = "https://www.facebook.com/dialog/oauth?"\
                              "client_id={client_id}" \
                              "&redirect_uri={uri}" \
-                             .format(client_id=config['pyfacebook.appid'],
+                    .format(client_id=config['pyfacebook.appid'],
                                      uri=redirect_to_self_url)
                 if self.scope:
                     target_url += ("&scope=" + self.scope)
                 self._redirect_to(environ, target_url=target_url)
                 return None
 
+            data_source = 'from cookie'
+
         environ[REPOZE_WHO_LOGGER] \
-            .info('Received (from cookie) fb_user = %s', fb_user)
+            .info('Received fb_user = %r (%s)', fb_user, data_source)
+
         # Store a local instance of the user data so we don't need
         # a round-trip to Facebook on every request
 
@@ -264,24 +270,12 @@ class FacebookConnectIdentificationPlugin(object):
         except facebook.GraphAPIError as e:
             self._log_graph_api_exception(
                 'Exception in get_object()', e, environ)
-
-            # Error 102: Session key invalid or no longer valid.
-            # if e.code == 102:
-            #     # E.g., delete the cookie and send the user to
-            #     # Facebook to login.
-            #     environ[REPOZE_WHO_LOGGER].warn('Facebook Error: ' \
-            #                   'Session key invalid or no longer valid.')
-            #     environ[REPOZE_WHO_LOGGER].warn('Logging out from Facebook session.')
-            #     response = Response(request=request)
-            #     fb.logout(response)
-            #     environ['repoze.who.application'] = response
-            #     return None
             raise
 
         profile['access_token'] = fb_user['access_token']
 
         environ[REPOZE_WHO_LOGGER] \
-            .warn('graph.get_object("me") = %s', repr(profile))
+            .warn('graph.get_object("me") = %r', profile)
 
         if self.identified_hook is None:  # or (fb_user is None):
             environ[REPOZE_WHO_LOGGER] \
@@ -342,9 +336,8 @@ class FacebookConnectIdentificationPlugin(object):
             'authenticate: identity = %s', identity)
 
         if FACEBOOK_CONNECT_REPOZE_WHO_ID_KEY in identity:
-            environ[REPOZE_WHO_LOGGER].info(
-                'authenticated : %s ',
-                identity[FACEBOOK_CONNECT_REPOZE_WHO_ID_KEY])
+            environ[REPOZE_WHO_LOGGER].info('authenticated : %s ',
+                                            identity[FACEBOOK_CONNECT_REPOZE_WHO_ID_KEY])
 
             return identity.get(FACEBOOK_CONNECT_REPOZE_WHO_ID_KEY)
 
