@@ -1,14 +1,15 @@
 from setuptools import setup, find_packages
 import os
 
-version = '0.1.0'
+version = '0.5.0'
 
 setup(name='repoze.who.plugins.facebook_connect',
       version=version,
       description="A Facebook Connect plugin for repoze.who",
       long_description=open("README.txt").read() + "\n" +
                        open(os.path.join("docs", "HISTORY.txt")).read(),
-      # Get more strings from http://www.python.org/pypi?%3Aaction=list_classifiers
+      # Get more strings from
+      # http://www.python.org/pypi?%3Aaction=list_classifiers
       classifiers=[
         "Programming Language :: Python",
         "Development Status :: 4 - Beta",
@@ -21,15 +22,15 @@ setup(name='repoze.who.plugins.facebook_connect',
       keywords='facebook connect repoze who identification authentication plugin',
       author='Martin Thorsen Ranang',
       author_email='mtr@ranang.org',
-      url='http://ranang.org/docs/repoze.who.plugins.facebook_connect',
+      url='https://github.com/mtr/repoze.who.plugins.facebook_connect',
       license="BSD-derived (http://www.repoze.org/LICENSE.txt)",
       packages=find_packages(exclude=['ez_setup']),
       namespace_packages=['repoze', 'repoze.who', 'repoze.who.plugins'],
       include_package_data=True,
       zip_safe=False,
       install_requires=[
-          'repoze.who>=1.0.6', 
-	  'facebook-sdk>=0.1',
+          'repoze.who>=2.1b1', 
+	  'facebook-sdk>=0.5.0',
           'setuptools',
           'webob',
           'zope.interface'
