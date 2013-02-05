@@ -220,6 +220,7 @@ class FacebookConnectIdentificationPlugin(object):
             except facebook.GraphAPIError as e:
                 self._log_graph_api_exception(
                     'Exception in get_access_token_from_code()', e, environ)
+                self._redirect_to(environ)
                 return None
         else:
             try:
