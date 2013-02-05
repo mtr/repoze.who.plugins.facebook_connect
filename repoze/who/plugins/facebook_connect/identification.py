@@ -203,9 +203,10 @@ class FacebookConnectIdentificationPlugin(object):
         redirect_to_self_url = request.application_url + \
             self.login_handler_path
 
-        if 'access_token' in request.params:
+        if 'access_token' in request.params and 'uid' in request.params:
             fb_user = {
                 'access_token': request.params['access_token'],
+                'uid': request.params['uid'],
             }
 
             data_source = 'from params'
