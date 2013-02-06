@@ -96,14 +96,14 @@ class FacebookConnectIdentificationPlugin(object):
                  rememberer_name='',
                  identified_hook=None,
                  fields=None,
-                 scope=None,
+                 perms=None,
                  ):
 
         self.rememberer_name = rememberer_name
         self.login_handler_path = login_handler_path
         self.logout_handler_path = logout_handler_path
         self.login_form_url = login_form_url
-        self.scope = scope
+        self.perms = perms
 
         self.user_class = user_class
         self.fb_user_class = fb_user_class
@@ -236,13 +236,10 @@ class FacebookConnectIdentificationPlugin(object):
                 self._log_graph_api_exception(
                     'Exception in get_user_from_cookie()', e, environ)
                 # Redirect to Facebook to get a code for a new access token.
-                target_url = "https://www.facebook.com/dialog/oauth?"\
-                             "client_id={client_id}" \
-                             "&redirect_uri={uri}" \
-                    .format(client_id=config['pyfacebook.appid'],
-                                     uri=redirect_to_self_url)
-                if self.scope:
-                    target_url += ("&scope=" + self.scope)
+                target_url = facebook.auth_url(config['pyfacebook.appid'],
+                                               redirect_to_self_url,
+                                               perms=self.perms)
+
                 self._redirect_to(environ, target_url=target_url)
                 return None
 
