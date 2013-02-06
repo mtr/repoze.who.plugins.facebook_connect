@@ -96,12 +96,14 @@ class FacebookConnectIdentificationPlugin(object):
                  rememberer_name='',
                  identified_hook=None,
                  fields=None,
+                 scope=None,
                  ):
 
         self.rememberer_name = rememberer_name
         self.login_handler_path = login_handler_path
         self.logout_handler_path = logout_handler_path
         self.login_form_url = login_form_url
+        self.scope = scope
 
         self.user_class = user_class
         self.fb_user_class = fb_user_class
@@ -161,6 +163,11 @@ class FacebookConnectIdentificationPlugin(object):
     #                              config['pyfacebook.secret'])
 
     # IIdentifier
+    def _log_graph_api_exception(self, message, exception, environ):
+        environ[REPOZE_WHO_LOGGER] \
+            .warn('%s %s: type=%r, message=%r', message, type(exception),
+                  exception.type, exception.message)
+
     def identify(self, environ):
         """This method is called when a request is incoming.
 
@@ -196,9 +203,10 @@ class FacebookConnectIdentificationPlugin(object):
         redirect_to_self_url = request.application_url + \
             self.login_handler_path
 
-        if 'access_token' in request.params:
+        if 'access_token' in request.params and 'uid' in request.params:
             fb_user = {
                 'access_token': request.params['access_token'],
+                'uid': request.params['uid'],
             }
 
             data_source = 'from params'
@@ -211,10 +219,9 @@ class FacebookConnectIdentificationPlugin(object):
                     config['pyfacebook.appid'],
                     config['pyfacebook.secret'])
             except facebook.GraphAPIError as e:
-                environ[REPOZE_WHO_LOGGER] \
-                    .warn('Exception in get_access_token_from_code() %s: '
-                          'type=%r, message=%r', type(e), e.type, e.message)
-                self._logout_and_redirect(environ)
+                self._log_graph_api_exception(
+                    'Exception in get_access_token_from_code()', e, environ)
+                self._redirect_to(environ)
                 return None
 
             data_source = 'via Facebook "code"'
@@ -222,20 +229,21 @@ class FacebookConnectIdentificationPlugin(object):
         else:
             try:
                 fb_user = facebook.get_user_from_cookie(
-                    request.cookies, config['pyfacebook.appid'],
+                    request.cookies,
+                    config['pyfacebook.appid'],
                     config['pyfacebook.secret'])
             except facebook.GraphAPIError as e:
-                environ[REPOZE_WHO_LOGGER] \
-                    .warn('Exception in get_user_from_cookie() %s: '
-                          'type=%r, message=%r', type(e), e.type, e.message)
+                self._log_graph_api_exception(
+                    'Exception in get_user_from_cookie()', e, environ)
                 # Redirect to Facebook to get a code for a new access token.
-                self._redirect_to(
-                    environ,
-                    target_url="https://www.facebook.com/dialog/oauth?"
-                               "client_id={client_id}"
-                               "&redirect_uri={uri}"
+                target_url = "https://www.facebook.com/dialog/oauth?"\
+                             "client_id={client_id}" \
+                             "&redirect_uri={uri}" \
                     .format(client_id=config['pyfacebook.appid'],
-                            uri=redirect_to_self_url))
+                                     uri=redirect_to_self_url)
+                if self.scope:
+                    target_url += ("&scope=" + self.scope)
+                self._redirect_to(environ, target_url=target_url)
                 return None
 
             data_source = 'from cookie'
@@ -261,9 +269,8 @@ class FacebookConnectIdentificationPlugin(object):
                 fb_user['uid'] = profile['id']
 
         except facebook.GraphAPIError as e:
-            environ[REPOZE_WHO_LOGGER] \
-                .warn('Received %s: type=%r, message=%r',
-                      type(e), e.type, e.message)
+            self._log_graph_api_exception(
+                'Exception in get_object()', e, environ)
             raise
 
         profile['access_token'] = fb_user['access_token']
