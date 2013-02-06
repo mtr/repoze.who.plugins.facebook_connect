@@ -168,6 +168,15 @@ class FacebookConnectIdentificationPlugin(object):
             .warn('%s %s: type=%r, message=%r', message, type(exception),
                   exception.type, exception.message)
 
+    def _redirect_to_perms_dialog(self, environ, redirect_to_self_url,
+                                  perms=None):
+        if perms is None:
+            perms = self.perms
+        target_url = facebook.auth_url(config['pyfacebook.appid'],
+                                       redirect_to_self_url,
+                                       perms=perms)
+        self._redirect_to(environ, target_url=target_url)
+
     def identify(self, environ):
         """This method is called when a request is incoming.
 
@@ -236,11 +245,7 @@ class FacebookConnectIdentificationPlugin(object):
                 self._log_graph_api_exception(
                     'Exception in get_user_from_cookie()', e, environ)
                 # Redirect to Facebook to get a code for a new access token.
-                target_url = facebook.auth_url(config['pyfacebook.appid'],
-                                               redirect_to_self_url,
-                                               perms=self.perms)
-
-                self._redirect_to(environ, target_url=target_url)
+                self._redirect_to_perms_dialog(environ, redirect_to_self_url)
                 return None
 
             data_source = 'from cookie'
@@ -264,6 +269,16 @@ class FacebookConnectIdentificationPlugin(object):
                 assert profile['id'] == fb_user['uid']
             else:
                 fb_user['uid'] = profile['id']
+
+            permissions = graph.get_permissions()
+
+            if not 'email' in permissions:
+                environ[REPOZE_WHO_LOGGER].warn(
+                    'No permissions to access email address, '
+                    'will redirect to permission dialog.')
+                self._redirect_to_perms_dialog(environ, redirect_to_self_url,
+                                               perms=['email'])
+                return None
 
         except facebook.GraphAPIError as e:
             self._log_graph_api_exception(
