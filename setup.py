@@ -30,7 +30,7 @@ setup(name='repoze.who.plugins.facebook_connect',
       zip_safe=False,
       install_requires=[
           'repoze.who>=2.1b1', 
-	  'facebook_sdk>=0.5.0',
+	  'facebook_sdk>=0.5.1',
           'setuptools',
           'webob',
           'zope.interface'
