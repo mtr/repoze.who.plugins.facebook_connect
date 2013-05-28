@@ -88,7 +88,7 @@ class FacebookConnectIdentificationPlugin(object):
                  fb_user_class=None,
                  session_name='',
                  login_handler_path='',
-                 logout_handler_path='',
+                 logout_handler_paths=None,
                  login_form_url='',
                  logged_in_url='',
                  logged_out_url='',
@@ -101,7 +101,8 @@ class FacebookConnectIdentificationPlugin(object):
 
         self.rememberer_name = rememberer_name
         self.login_handler_path = login_handler_path
-        self.logout_handler_path = logout_handler_path
+        self.logout_handler_paths = (logout_handler_paths
+                                     if logout_handler_paths else [])
         self.login_form_url = login_form_url
         self.perms = perms
 
@@ -197,7 +198,11 @@ class FacebookConnectIdentificationPlugin(object):
         request = Request(environ)
 
         # First test for logout as we then don't need the rest.
-        if request.path == self.logout_handler_path:
+        if request.path in self.logout_handler_paths:
+            if request.path.endswith('.json'):
+                self._logout_json(environ)
+                return None
+
             self._logout_and_redirect(environ)
             return None                 # No identity was found.
 
@@ -304,6 +309,21 @@ class FacebookConnectIdentificationPlugin(object):
         self._redirect_to(environ, redirect_to_url, cookies)
 
         return identity
+
+    def _logout_json(self, environ):
+        print '_logout_json'
+        response = Response()
+
+        # Set forget headers.
+        for a, v in self.forget(environ, {}):
+            print 'forgetting a={0!r}, v={1!r}'.format(a, v)
+            response.headers.add(a, v)
+
+        # response.status = 302
+        # response.location = self.logged_out_url
+        environ['repoze.who.application'] = response
+
+        return {}                  # Unset authentication information.
 
     def _logout_and_redirect(self, environ):
         response = Response()

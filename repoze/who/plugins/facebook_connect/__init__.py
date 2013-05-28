@@ -9,7 +9,7 @@ def make_identification_plugin(
     fb_user_class=None,
     session_name=None,
     login_handler_path=None,
-    logout_handler_path=None,
+    logout_handler_paths=None,
     login_form_url=None,
     error_field='error',
     logged_in_url=None,
@@ -25,8 +25,8 @@ def make_identification_plugin(
         raise ValueError("rememberer_name needs to be given")
     if login_handler_path is None:
         raise ValueError("login_handler_path needs to be given")
-    if logout_handler_path is None:
-        raise ValueError("logout_handler_path needs to be given")
+    if logout_handler_paths is None:
+        raise ValueError("logout_handler_paths needs to be given")
     if session_name is None:
         raise ValueError("session_name needs to be given")
     if logged_in_url is None:
@@ -45,7 +45,7 @@ def make_identification_plugin(
         session_name=session_name,
         login_form_url=login_form_url,
         login_handler_path=login_handler_path,
-        logout_handler_path=logout_handler_path,
+        logout_handler_paths=logout_handler_paths,
         logged_in_url=logged_in_url,
         logged_out_url=logged_out_url,
         came_from_field=came_from_field,
