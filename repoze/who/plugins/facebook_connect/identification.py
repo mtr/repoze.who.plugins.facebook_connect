@@ -214,6 +214,11 @@ class FacebookConnectIdentificationPlugin(object):
         elif request.path != self.login_handler_path:
             return None
 
+        try:
+            request.scheme = request.headers['X-Forwarded-Proto']
+        except KeyError:
+            pass
+
         redirect_to_self_url = request.application_url + \
             self.login_handler_path
 
