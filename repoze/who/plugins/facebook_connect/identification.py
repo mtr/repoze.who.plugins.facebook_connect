@@ -3,9 +3,8 @@
 import base64
 import hmac
 
-from pylons.controllers.util import Response as PylonsResponse
 from repoze.who.interfaces import IIdentifier, IAuthenticator
-from webob import Request
+from webob import Request, Response as WebObResponse
 from zope.interface import implements
 from tg import config
 
@@ -25,7 +24,14 @@ FACEBOOK_CONNECT_REPOZE_WHO_ID_KEY = 'repoze.who.facebook_connect.userid'
 REPOZE_WHO_LOGGER = 'repoze.who.logger'
 
 
-class Response(PylonsResponse):
+class Response(WebObResponse):
+    """WebOb Response subclass
+    """
+    content = WebObResponse.body
+
+    def wsgi_response(self):
+        return self.status, self.headers, self.body
+
     def signed_cookie(self, name, data, secret=None, **kwargs):
         """Save a signed cookie with ``secret`` signature
 
@@ -34,12 +40,12 @@ class Response(PylonsResponse):
         passed to the WebOb set_cookie method after creating the signed
         cookie value.
 
-        This implementation fixes the problem when
-        base64.encodestring, originally used, returned an
-        endline-partitioned string.
+        This implementation fixes the problem when base64.encodestring,
+         originally used, returned an endline-partitioned string.
         """
         pickled = pickle.dumps(data, pickle.HIGHEST_PROTOCOL)
-        sig = hmac.new(secret, pickled, sha1).hexdigest()
+        sig = hmac.new(secret.encode('ascii'), pickled,
+                       sha1).hexdigest().encode('ascii')
         self.set_cookie(name, sig + base64.b64encode(pickled), **kwargs)
 
 
