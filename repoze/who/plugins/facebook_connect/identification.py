@@ -2,12 +2,13 @@
 
 import base64
 import hmac
-from httplib import FOUND
+from httplib import FOUND, BAD_REQUEST
 
 from repoze.who.interfaces import IIdentifier, IAuthenticator
 from webob import Request, Response as WebObResponse
 from zope.interface import implements
 from tg import config
+
 
 try:
     import cPickle as pickle
@@ -22,7 +23,13 @@ import facebook
 
 
 FACEBOOK_CONNECT_REPOZE_WHO_ID_KEY = 'repoze.who.facebook_connect.userid'
+FACEBOOK_CONNECT_REPOZE_WHO_MISSING_MANDATORY = \
+    'repoze.who.facebook_connect.missing_mandatory'
+FACEBOOK_CONNECT_REPOZE_WHO_MISSING_OPTIONAL = \
+    'repoze.who.facebook_connect.missing_optional'
 REPOZE_WHO_LOGGER = 'repoze.who.logger'
+FACEBOOK_API_VERSION = (2, 2)
+FACEBOOK_API_VERSION_STR = u'.'.join(map(str, FACEBOOK_API_VERSION))
 
 
 class Response(WebObResponse):
@@ -87,6 +94,8 @@ class FacebookConnectIdentificationPlugin(object):
     """
     implements(IIdentifier, IAuthenticator)
 
+    _has_already_logged_fb_version = False
+
     def __init__(self,
                  fb_connect_field='fb_connect',
                  error_field='',
@@ -94,7 +103,7 @@ class FacebookConnectIdentificationPlugin(object):
                  user_class=None,
                  fb_user_class=None,
                  session_name='',
-                 login_handler_path='',
+                 login_handler_paths=None,
                  logout_handler_paths=None,
                  login_form_url='',
                  logged_in_url='',
@@ -102,16 +111,19 @@ class FacebookConnectIdentificationPlugin(object):
                  came_from_field='',
                  rememberer_name='',
                  identified_hook=None,
+                 mandatory_permissions=None,
+                 optional_permissions=None,
                  fields=None,
-                 perms=None,
+                 v1_perms=None,
                  ):
 
         self.rememberer_name = rememberer_name
-        self.login_handler_path = login_handler_path
+        self.login_handler_paths = (login_handler_paths
+                                    if login_handler_paths else [])
         self.logout_handler_paths = (logout_handler_paths
                                      if logout_handler_paths else [])
         self.login_form_url = login_form_url
-        self.perms = perms
+        self.v1_perms = v1_perms
 
         self.user_class = user_class
         self.fb_user_class = fb_user_class
@@ -125,6 +137,11 @@ class FacebookConnectIdentificationPlugin(object):
 
         self.identified_hook = identified_hook
 
+        self.mandatory_permissions = set(mandatory_permissions if
+                                         mandatory_permissions else ['installed'])
+        self.optional_permissions = set(optional_permissions
+                                        if optional_permissions else [])
+
         self.fields = fields if fields is not None else [
             u'birthday_date',
             u'first_name',
@@ -137,8 +154,7 @@ class FacebookConnectIdentificationPlugin(object):
         self.fb_connect_field = fb_connect_field
 
     def _get_rememberer(self, environ):
-        rememberer = environ['repoze.who.plugins'][self.rememberer_name]
-        return rememberer
+        return environ['repoze.who.plugins'][self.rememberer_name]
 
     @staticmethod
     def _set_handler(environ, response):
@@ -159,7 +175,8 @@ class FacebookConnectIdentificationPlugin(object):
         environ[REPOZE_WHO_LOGGER] \
             .debug('Redirecting to {0!r}'.format(target_url))
 
-    def _log_graph_api_exception(self, message, exception, environ):
+    @staticmethod
+    def _log_graph_api_exception(message, exception, environ):
         environ[REPOZE_WHO_LOGGER] \
             .warn('%s %s: type=%r, message=%r', message, type(exception),
                   exception.type, exception.message)
@@ -168,7 +185,7 @@ class FacebookConnectIdentificationPlugin(object):
     def _redirect_to_perms_dialog(self, environ, redirect_to_self_url,
                                   perms=None):
         if perms is None:
-            perms = self.perms
+            perms = self.v1_perms
         target_url = facebook.auth_url(config['pyfacebook.appid'],
                                        redirect_to_self_url,
                                        perms=perms)
@@ -203,8 +220,9 @@ class FacebookConnectIdentificationPlugin(object):
         else:
             self._logout_and_redirect(environ, response)
 
-    def _get_full_login_handler_url(self, request):
-        return request.application_url + self.login_handler_path
+    @staticmethod
+    def _get_full_login_handler_url(request):
+        return request.application_url + request.path
 
     def _deduct_default_target_url(self, request):
         return request.params.get(self.came_from_field, self.logged_in_url)
@@ -226,6 +244,11 @@ class FacebookConnectIdentificationPlugin(object):
         If this key is present in the identity dictionary, no
         authenticators will be asked to authenticate the identity.
         """
+        if not self._has_already_logged_fb_version:
+            environ[REPOZE_WHO_LOGGER].info(u'Using Facebook API v%s',
+                                            FACEBOOK_API_VERSION_STR)
+            self._has_already_logged_fb_version = True
+
         request = Request(environ)
         response = Response()
 
@@ -238,7 +261,7 @@ class FacebookConnectIdentificationPlugin(object):
         # configuration) this URL is used for both: the answer for the
         # login form and when the openid provider redirects the user
         # back.
-        elif request.path != self.login_handler_path:
+        elif request.path not in self.login_handler_paths:
             return None
 
         try:
@@ -247,6 +270,8 @@ class FacebookConnectIdentificationPlugin(object):
             pass
 
         login_handler_url = self._get_full_login_handler_url(request)
+        environ[REPOZE_WHO_LOGGER].debug(u'login_handler_url: %r',
+                                         login_handler_url)
         default_target_url = self._deduct_default_target_url(request)
 
         if 'access_token' in request.params and 'uid' in request.params:
@@ -295,10 +320,11 @@ class FacebookConnectIdentificationPlugin(object):
         # a round-trip to Facebook on every request
 
         try:
-            graph = facebook.GraphAPI(fb_user["access_token"])
+            graph = facebook.GraphAPI(fb_user["access_token"],
+                                      version=FACEBOOK_API_VERSION_STR)
             profile = graph.get_object("me")
 
-            if not 'id' in profile:
+            if 'id' not in profile:
                 environ[REPOZE_WHO_LOGGER] \
                     .warn('Facebook Python-SDK received no uid.')
                 return self._logout(environ, request, response)  # --> None
@@ -308,25 +334,53 @@ class FacebookConnectIdentificationPlugin(object):
             else:
                 fb_user['uid'] = profile['id']
 
-            permissions = graph.get_permissions()
+            permissions = graph.request('me/permissions')['data']
+            environ[REPOZE_WHO_LOGGER].info(u'Granted Facebook permissions: %r',
+                                            permissions)
 
-            if not 'email' in permissions:
-                environ[REPOZE_WHO_LOGGER].warn(
-                    'No permissions to access email address, '
-                    'will redirect to permission dialog.')
-                self._redirect_to_perms_dialog(environ, login_handler_url,
-                                               perms=['email'])
-                return None
+            if FACEBOOK_API_VERSION >= (2, 0):
+                granted = [
+                    item['permission'] for item in permissions
+                    if item['status'] == 'granted'
+                ]
+                missing_mandatory = self.mandatory_permissions - set(granted)
+                missing_optional = self.optional_permissions - set(granted)
+
+                if missing_optional:
+                    environ[REPOZE_WHO_LOGGER]\
+                        .info(u'Missing optional permissions: %r',
+                              missing_optional)
+                    environ[FACEBOOK_CONNECT_REPOZE_WHO_MISSING_OPTIONAL] = \
+                        missing_optional
+
+                if missing_mandatory:
+                    environ[REPOZE_WHO_LOGGER]\
+                        .info(u'Missing mandatory permissions: %r',
+                              missing_mandatory)
+                    environ[FACEBOOK_CONNECT_REPOZE_WHO_MISSING_MANDATORY] = \
+                        missing_mandatory
+                    response.status = BAD_REQUEST
+                    self._set_handler(environ, response)
+                    return None
+
+            else:
+                # Legacy, against FB API < v2.0:
+                if 'email' not in permissions:
+                    environ[REPOZE_WHO_LOGGER].warn(
+                        'No permissions to access email address, '
+                        'will redirect to permission dialog.')
+                    self._redirect_to_perms_dialog(environ, login_handler_url,
+                                                   perms=['email'])
+                    return None
 
         except facebook.GraphAPIError as e:
-            self._log_graph_api_exception(
-                'Exception in get_object()', e, environ)
+            self._log_graph_api_exception('Exception in get_object()', e,
+                                          environ)
             raise
 
         profile['access_token'] = fb_user['access_token']
 
-        environ[REPOZE_WHO_LOGGER] \
-            .info('graph.get_object("me") = %r', profile)
+        environ[REPOZE_WHO_LOGGER].info('graph.get_object("me") = %r', profile)
 
         if self.identified_hook is None:  # or (fb_user is None):
             environ[REPOZE_WHO_LOGGER] \
@@ -357,7 +411,8 @@ class FacebookConnectIdentificationPlugin(object):
         return self._get_rememberer(environ).forget(environ, identity)
 
     # IAuthenticator
-    def authenticate(self, environ, identity):
+    @staticmethod
+    def authenticate(environ, identity):
         """Dummy authenticator
 
         This takes the Facebook Connect identity found and uses it as

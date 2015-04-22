@@ -1,8 +1,8 @@
-from repoze.who.plugins.facebook_connect.identification import (
-    FACEBOOK_CONNECT_REPOZE_WHO_ID_KEY,
-)
 import zope.interface
 from repoze.who.interfaces import IChallengeDecider
+
+from repoze.who.plugins.facebook_connect.identification import (
+    FACEBOOK_CONNECT_REPOZE_WHO_ID_KEY)
 
 
 def fb_connect_challenge_decider(environ, status, headers):
@@ -15,5 +15,4 @@ def fb_connect_challenge_decider(environ, status, headers):
         return True
     return False
 
-zope.interface.directlyProvides(
-    fb_connect_challenge_decider, IChallengeDecider)
+zope.interface.directlyProvides(fb_connect_challenge_decider, IChallengeDecider)
