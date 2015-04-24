@@ -28,7 +28,7 @@ FACEBOOK_CONNECT_REPOZE_WHO_MISSING_MANDATORY = \
 FACEBOOK_CONNECT_REPOZE_WHO_MISSING_OPTIONAL = \
     'repoze.who.facebook_connect.missing_optional'
 REPOZE_WHO_LOGGER = 'repoze.who.logger'
-FACEBOOK_API_VERSION = (2, 2)
+FACEBOOK_API_VERSION = (2, 3)
 FACEBOOK_API_VERSION_STR = u'.'.join(map(str, FACEBOOK_API_VERSION))
 
 
@@ -322,8 +322,7 @@ class FacebookConnectIdentificationPlugin(object):
         try:
             graph = facebook.GraphAPI(fb_user["access_token"],
                                       version=FACEBOOK_API_VERSION_STR)
-            profile = graph.get_object("me")
-
+            profile = graph.get_object('me')
             if 'id' not in profile:
                 environ[REPOZE_WHO_LOGGER] \
                     .warn('Facebook Python-SDK received no uid.')
@@ -334,7 +333,7 @@ class FacebookConnectIdentificationPlugin(object):
             else:
                 fb_user['uid'] = profile['id']
 
-            permissions = graph.request('me/permissions')['data']
+            permissions = graph.get_object('me/permissions')['data']
             environ[REPOZE_WHO_LOGGER].info(u'Granted Facebook permissions: %r',
                                             permissions)
 
