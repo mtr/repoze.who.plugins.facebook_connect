@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 import os
 
-version = '2.0.2'
+version = '2.1.0'
 
 setup(name='repoze.who.plugins.facebook_connect',
       version=version,
@@ -29,8 +29,8 @@ setup(name='repoze.who.plugins.facebook_connect',
       include_package_data=True,
       zip_safe=False,
       install_requires=[
-          'repoze.who>=2.1b1', 
-	  'facebook_sdk>=0.5.1',
+          'repoze.who>=2.1b1',
+          'facebook_sdk>=0.5.1',
           'setuptools',
           'webob',
           'zope.interface'

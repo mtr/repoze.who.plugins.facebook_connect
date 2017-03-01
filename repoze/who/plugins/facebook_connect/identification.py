@@ -28,8 +28,35 @@ FACEBOOK_CONNECT_REPOZE_WHO_MISSING_MANDATORY = \
 FACEBOOK_CONNECT_REPOZE_WHO_MISSING_OPTIONAL = \
     'repoze.who.facebook_connect.missing_optional'
 REPOZE_WHO_LOGGER = 'repoze.who.logger'
-FACEBOOK_API_VERSION = (2, 3)
-FACEBOOK_API_VERSION_STR = u'.'.join(map(str, FACEBOOK_API_VERSION))
+
+
+class FacebookApiVersion(object):
+    _version = None
+
+    def __init__(self, version=None):
+        self._version = version
+        self._version_str = self._version_to_string(self._version)
+
+    @staticmethod
+    def _version_to_string(version):
+        return u'.'.join(map(str, version))
+
+    def _get(self):
+        if self._version is None:
+            self._version = tuple(config['pyfacebook.api_version'].split('.'))
+            self._version_str = self._version_to_string(self._version)
+
+        return self._version, self._version_str
+
+    @property
+    def tuple(self):
+        return self._get()[0]
+
+    @property
+    def string(self):
+        return self._get()[1]
+
+api_version = FacebookApiVersion()
 
 
 class Response(WebObResponse):
@@ -246,7 +273,7 @@ class FacebookConnectIdentificationPlugin(object):
         """
         if not self._has_already_logged_fb_version:
             environ[REPOZE_WHO_LOGGER].info(u'Using Facebook API v%s',
-                                            FACEBOOK_API_VERSION_STR)
+                                            api_version.string)
             self._has_already_logged_fb_version = True
 
         request = Request(environ)
@@ -321,7 +348,7 @@ class FacebookConnectIdentificationPlugin(object):
 
         try:
             graph = facebook.GraphAPI(fb_user["access_token"],
-                                      version=FACEBOOK_API_VERSION_STR)
+                                      version=api_version.string)
             profile = graph.get_object('me')
             if 'id' not in profile:
                 environ[REPOZE_WHO_LOGGER] \
@@ -337,7 +364,7 @@ class FacebookConnectIdentificationPlugin(object):
             environ[REPOZE_WHO_LOGGER].info(u'Granted Facebook permissions: %r',
                                             permissions)
 
-            if FACEBOOK_API_VERSION >= (2, 0):
+            if api_version.tuple >= (2, 0):
                 granted = [
                     item['permission'] for item in permissions
                     if item['status'] == 'granted'
