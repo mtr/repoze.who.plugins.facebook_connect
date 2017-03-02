@@ -28,9 +28,8 @@ FACEBOOK_CONNECT_REPOZE_WHO_MISSING_OPTIONAL = \
 REPOZE_WHO_LOGGER = 'repoze.who.logger'
 
 
-class FacebookConnectError(object, Exception):
-    def __init__(self, *args):
-        super(FacebookConnectError, self).__init__(*args)
+class FacebookConnectError(Exception):
+    pass
 
 
 FBClientConf = namedtuple('FBClientConf',
