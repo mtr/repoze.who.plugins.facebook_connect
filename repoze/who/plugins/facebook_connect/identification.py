@@ -2,13 +2,12 @@
 
 import base64
 import hmac
+from collections import namedtuple
 from httplib import FOUND, BAD_REQUEST
 
 from repoze.who.interfaces import IIdentifier, IAuthenticator
 from webob import Request, Response as WebObResponse
 from zope.interface import implements
-from tg import config
-
 
 try:
     import cPickle as pickle
@@ -19,8 +18,7 @@ try:
 except ImportError:
     import sha as sha1
 
-import facebook
-
+from facebook import get_user_from_cookie, GraphAPI, GraphAPIError, auth_url
 
 FACEBOOK_CONNECT_REPOZE_WHO_ID_KEY = 'repoze.who.facebook_connect.userid'
 FACEBOOK_CONNECT_REPOZE_WHO_MISSING_MANDATORY = \
@@ -30,33 +28,73 @@ FACEBOOK_CONNECT_REPOZE_WHO_MISSING_OPTIONAL = \
 REPOZE_WHO_LOGGER = 'repoze.who.logger'
 
 
-class FacebookApiVersion(object):
-    _version = None
+class FacebookConnectError(object, Exception):
+    def __init__(self, *args):
+        super(FacebookConnectError, self).__init__(*args)
 
-    def __init__(self, version=None):
-        self._version = version
-        self._version_str = self._version_to_string(self._version)
+
+FBClientConf = namedtuple('FBClientConf',
+                          'app_id '
+                          'app_secret '
+                          'api_version_tuple '
+                          'api_version_string ')
+
+
+class FacebookApiClientConfig(object):
+    _config = None
+
+    def __init__(self, app_id=None, app_secret=None, version=None):
+        version_str = self._version_tuple_to_string(version)
+
+        if app_id is not None \
+                and app_secret is not None \
+                and version is not None:
+            self._config = FBClientConf(app_id, app_secret, version,
+                                        version_str)
 
     @staticmethod
-    def _version_to_string(version):
+    def _version_tuple_to_string(version):
         return u'.'.join(map(str, version))
 
-    def _get(self):
-        if self._version is None:
-            self._version = tuple(config['pyfacebook.api_version'].split('.'))
-            self._version_str = self._version_to_string(self._version)
+    def _get_client_config(self):
+        if self._config is None:
+            from tg import config
 
-        return self._version, self._version_str
+            try:
+                api_version = tuple(config.get('pyfacebook.api_version',
+                                               None).split('.'))
+            except AttributeError:
+                raise FacebookConnectError('You must supply a '
+                                           '"pyfacebook.api_version" '
+                                           'configuration parameter, '
+                                           'for example "2.3".')
+
+            api_version_str = self._version_tuple_to_string(api_version)
+
+            self._config = FBClientConf(config['pyfacebook.appid'],
+                                        config['pyfacebook.secret'],
+                                        api_version, api_version_str)
+
+        return self._config
 
     @property
-    def tuple(self):
-        return self._get()[0]
+    def version_tuple(self):
+        return self._get_client_config().api_version_tuple
 
     @property
-    def string(self):
-        return self._get()[1]
+    def version_string(self):
+        return self._get_client_config().api_version_string
 
-api_version = FacebookApiVersion()
+    @property
+    def app_id(self):
+        return self._get_client_config().app_id
+
+    @property
+    def app_secret(self):
+        return self._get_client_config().app_secret
+
+
+client_config = FacebookApiClientConfig()
 
 
 class Response(WebObResponse):
@@ -165,7 +203,8 @@ class FacebookConnectIdentificationPlugin(object):
         self.identified_hook = identified_hook
 
         self.mandatory_permissions = set(mandatory_permissions if
-                                         mandatory_permissions else ['installed'])
+                                         mandatory_permissions else [
+            'installed'])
         self.optional_permissions = set(optional_permissions
                                         if optional_permissions else [])
 
@@ -213,9 +252,9 @@ class FacebookConnectIdentificationPlugin(object):
                                   perms=None):
         if perms is None:
             perms = self.v1_perms
-        target_url = facebook.auth_url(config['pyfacebook.appid'],
-                                       redirect_to_self_url,
-                                       perms=perms)
+        target_url = auth_url(client_config.app_id,
+                              redirect_to_self_url,
+                              perms=perms)
         self._redirect(environ, target_url=target_url)
 
     def _logout_json(self, environ, response):
@@ -229,7 +268,7 @@ class FacebookConnectIdentificationPlugin(object):
 
         self._set_handler(environ, response)
 
-        return {}                  # Unset authentication information.
+        return {}  # Unset authentication information.
 
     def _logout_and_redirect(self, environ, response):
         self._redirect(environ, target_url=self.logged_out_url,
@@ -239,7 +278,7 @@ class FacebookConnectIdentificationPlugin(object):
         for a, v in self.forget(environ, {}):
             response.headers.add(a, v)
 
-        return {}                  # Unset authentication information.
+        return {}  # Unset authentication information.
 
     def _logout(self, environ, request, response):
         if request.path.endswith('.json'):
@@ -273,7 +312,7 @@ class FacebookConnectIdentificationPlugin(object):
         """
         if not self._has_already_logged_fb_version:
             environ[REPOZE_WHO_LOGGER].info(u'Using Facebook API v%s',
-                                            api_version.string)
+                                            client_config.version_string)
             self._has_already_logged_fb_version = True
 
         request = Request(environ)
@@ -311,12 +350,12 @@ class FacebookConnectIdentificationPlugin(object):
 
         elif 'code' in request.params:
             try:
-                fb_user = facebook.get_access_token_from_code(
-                    request.params['code'],
-                    login_handler_url,
-                    config['pyfacebook.appid'],
-                    config['pyfacebook.secret'])
-            except facebook.GraphAPIError as e:
+                fb_user = GraphAPI(version=client_config.version_string) \
+                    .get_access_token_from_code(request.params['code'],
+                                                login_handler_url,
+                                                client_config.app_id,
+                                                client_config.app_secret)
+            except GraphAPIError as e:
                 self._log_graph_api_exception(
                     'Exception in get_access_token_from_code()', e, environ)
                 self._redirect(environ, target_url=default_target_url,
@@ -327,11 +366,10 @@ class FacebookConnectIdentificationPlugin(object):
 
         else:
             try:
-                fb_user = facebook.get_user_from_cookie(
-                    request.cookies,
-                    config['pyfacebook.appid'],
-                    config['pyfacebook.secret'])
-            except facebook.GraphAPIError as e:
+                fb_user = get_user_from_cookie(request.cookies,
+                                               client_config.app_id,
+                                               client_config.app_secret)
+            except GraphAPIError as e:
                 self._log_graph_api_exception(
                     'Exception in get_user_from_cookie()', e, environ)
                 # Redirect to Facebook to get a code for a new access token.
@@ -347,8 +385,8 @@ class FacebookConnectIdentificationPlugin(object):
         # a round-trip to Facebook on every request
 
         try:
-            graph = facebook.GraphAPI(fb_user["access_token"],
-                                      version=api_version.string)
+            graph = GraphAPI(fb_user["access_token"],
+                             version=client_config.version_string)
             profile = graph.get_object('me')
             if 'id' not in profile:
                 environ[REPOZE_WHO_LOGGER] \
@@ -364,7 +402,7 @@ class FacebookConnectIdentificationPlugin(object):
             environ[REPOZE_WHO_LOGGER].info(u'Granted Facebook permissions: %r',
                                             permissions)
 
-            if api_version.tuple >= (2, 0):
+            if client_config.version_tuple >= (2, 0):
                 granted = [
                     item['permission'] for item in permissions
                     if item['status'] == 'granted'
@@ -373,14 +411,14 @@ class FacebookConnectIdentificationPlugin(object):
                 missing_optional = self.optional_permissions - set(granted)
 
                 if missing_optional:
-                    environ[REPOZE_WHO_LOGGER]\
+                    environ[REPOZE_WHO_LOGGER] \
                         .info(u'Missing optional permissions: %r',
                               missing_optional)
                     environ[FACEBOOK_CONNECT_REPOZE_WHO_MISSING_OPTIONAL] = \
                         missing_optional
 
                 if missing_mandatory:
-                    environ[REPOZE_WHO_LOGGER]\
+                    environ[REPOZE_WHO_LOGGER] \
                         .info(u'Missing mandatory permissions: %r',
                               missing_mandatory)
                     environ[FACEBOOK_CONNECT_REPOZE_WHO_MISSING_MANDATORY] = \
@@ -399,7 +437,7 @@ class FacebookConnectIdentificationPlugin(object):
                                                    perms=['email'])
                     return None
 
-        except facebook.GraphAPIError as e:
+        except GraphAPIError as e:
             self._log_graph_api_exception('Exception in get_object()', e,
                                           environ)
             raise
