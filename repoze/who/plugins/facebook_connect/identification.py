@@ -43,7 +43,8 @@ class FacebookApiClientConfig(object):
     _config = None
 
     def __init__(self, app_id=None, app_secret=None, version=None):
-        version_str = self._version_tuple_to_string(version)
+        version_str = self._version_tuple_to_string(version) \
+            if version is not None else None
 
         if app_id is not None \
                 and app_secret is not None \
