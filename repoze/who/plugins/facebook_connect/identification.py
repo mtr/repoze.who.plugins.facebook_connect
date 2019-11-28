@@ -3,11 +3,11 @@
 import base64
 import hmac
 from collections import namedtuple
-from httplib import FOUND, BAD_REQUEST
-
-from repoze.who.interfaces import IIdentifier, IAuthenticator
-from webob import Request, Response as WebObResponse
+from httplib import BAD_REQUEST, FOUND
 from zope.interface import implements
+
+from repoze.who.interfaces import IAuthenticator, IIdentifier
+from webob import Request, Response as WebObResponse
 
 try:
     import cPickle as pickle
@@ -18,7 +18,7 @@ try:
 except ImportError:
     import sha as sha1
 
-from facebook import get_user_from_cookie, GraphAPI, GraphAPIError, auth_url
+from facebook import get_user_from_cookie, GraphAPI, GraphAPIError
 
 FACEBOOK_CONNECT_REPOZE_WHO_ID_KEY = 'repoze.who.facebook_connect.userid'
 FACEBOOK_CONNECT_REPOZE_WHO_MISSING_MANDATORY = \
@@ -252,9 +252,10 @@ class FacebookConnectIdentificationPlugin(object):
                                   perms=None):
         if perms is None:
             perms = self.v1_perms
-        target_url = auth_url(client_config.app_id,
-                              redirect_to_self_url,
-                              perms=perms)
+        target_url = GraphAPI(version=client_config.version_string) \
+            .get_auth_url(client_config.app_id,
+                          redirect_to_self_url,
+                          perms=perms)
         self._redirect(environ, target_url=target_url)
 
     def _logout_json(self, environ, response):
@@ -340,7 +341,24 @@ class FacebookConnectIdentificationPlugin(object):
                                          login_handler_url)
         default_target_url = self._deduct_default_target_url(request)
 
-        if 'access_token' in request.params and 'uid' in request.params:
+        json_body = None
+        if request.content_type == 'application/json':
+            try:
+                json_body = request.json
+            except:
+                pass
+
+        if json_body is not None \
+                and 'access_token' in json_body \
+                and 'uid' in json_body:
+            fb_user = {
+                'access_token': json_body['access_token'],
+                'uid': json_body['uid'],
+            }
+
+            data_source = 'from JSON params'
+
+        elif 'access_token' in request.params and 'uid' in request.params:
             fb_user = {
                 'access_token': request.params['access_token'],
                 'uid': request.params['uid'],
@@ -357,7 +375,7 @@ class FacebookConnectIdentificationPlugin(object):
                                                 client_config.app_secret)
             except GraphAPIError as e:
                 self._log_graph_api_exception(
-                    'Exception in get_access_token_from_code()', e, environ)
+                        'Exception in get_access_token_from_code()', e, environ)
                 self._redirect(environ, target_url=default_target_url,
                                response=response)
                 return None
@@ -371,7 +389,7 @@ class FacebookConnectIdentificationPlugin(object):
                                                client_config.app_secret)
             except GraphAPIError as e:
                 self._log_graph_api_exception(
-                    'Exception in get_user_from_cookie()', e, environ)
+                        'Exception in get_user_from_cookie()', e, environ)
                 # Redirect to Facebook to get a code for a new access token.
                 self._redirect_to_perms_dialog(environ, login_handler_url)
                 return None
@@ -431,8 +449,8 @@ class FacebookConnectIdentificationPlugin(object):
                 # Legacy, against FB API < v2.0:
                 if 'email' not in permissions:
                     environ[REPOZE_WHO_LOGGER].warn(
-                        'No permissions to access email address, '
-                        'will redirect to permission dialog.')
+                            'No permissions to access email address, '
+                            'will redirect to permission dialog.')
                     self._redirect_to_perms_dialog(environ, login_handler_url,
                                                    perms=['email'])
                     return None
@@ -487,7 +505,7 @@ class FacebookConnectIdentificationPlugin(object):
 
         """
         environ[REPOZE_WHO_LOGGER].debug(
-            'authenticate: identity = %s', identity)
+                'authenticate: identity = %s', identity)
 
         if FACEBOOK_CONNECT_REPOZE_WHO_ID_KEY in identity:
             environ[REPOZE_WHO_LOGGER] \
