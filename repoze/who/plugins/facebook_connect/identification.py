@@ -4,10 +4,10 @@ import base64
 import hmac
 from collections import namedtuple
 from httplib import BAD_REQUEST, FOUND
-from zope.interface import implements
 
 from repoze.who.interfaces import IAuthenticator, IIdentifier
 from webob import Request, Response as WebObResponse
+from zope.interface import implements
 
 try:
     import cPickle as pickle
@@ -395,6 +395,11 @@ class FacebookConnectIdentificationPlugin(object):
                 return None
 
             data_source = 'from cookie'
+
+        if fb_user is None:
+            environ[REPOZE_WHO_LOGGER] \
+                .info('Did not recieve any valid fb_user (all data sources)')
+            return None
 
         environ[REPOZE_WHO_LOGGER] \
             .info('Received fb_user = %r (%s)', fb_user, data_source)
